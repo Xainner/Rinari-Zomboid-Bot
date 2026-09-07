@@ -1,5 +1,5 @@
-export function progressForTool(tool: string, isXainner: boolean, serverName: string): string | null {
-  if (isXainner) {
+export function progressForTool(tool: string, isAdmin: boolean, serverName: string): string | null {
+  if (isAdmin) {
     switch (tool) {
       case 'restart_server':
         return `Si, Xainner. Reviso que siga siendo ${serverName} y preparo el reinicio. Solo toco el servidor, nada mas.`;
@@ -36,7 +36,7 @@ export function progressForTool(tool: string, isXainner: boolean, serverName: st
   }
 }
 
-export function resultForDenial(reason: string, isXainner: boolean, serverName: string): string {
-  if (isXainner) return `No pude hacerlo, Xainner: ${reason}. No voy a fingir que salio bien.`;
+export function resultForDenial(reason: string, isAdmin: boolean, serverName: string): string {
+  if (isAdmin) return `No pude hacerlo, Xainner: ${reason}. No voy a fingir que salio bien.`;
   return `No. ${reason}. Yo cuido ${serverName}, no hago milagros fuera de mis permisos.`;
 }

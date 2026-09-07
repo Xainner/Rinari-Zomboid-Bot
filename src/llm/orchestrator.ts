@@ -5,7 +5,7 @@ import { buildToolDefinitions, ToolDefinition } from '../tools/definitions.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { isLifecycleTool } from '../tools/registry.js';
 import { ConversationStore } from '../state/conversationStore.js';
-import { isXainner } from '../security/policy.js';
+import { isAdmin } from '../security/policy.js';
 import { sanitizeDiscord } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
@@ -85,7 +85,7 @@ export class Orchestrator {
   }
 
   private async run(msg: IncomingMessage, hooks?: { onToolStart?: (tool: string) => Promise<void> }): Promise<string> {
-    const trustedXainner = isXainner(msg.authorId, this.config.xainnerUserId);
+    const adminUser = isAdmin(msg.authorId, this.config.adminUserId);
     await this.store.append(msg.channelId, {
       role: 'user',
       content: `${msg.authorLabel}: ${msg.text}`,
@@ -103,13 +103,13 @@ export class Orchestrator {
     const trustedBlock = [
       'Trusted Discord metadata:',
       `author_id=${msg.authorId}`,
-      `is_xainner=${trustedXainner}`,
+      `is_admin=${adminUser}`,
       `channel_id=${msg.channelId}`,
       `target_server=${this.config.pzServerName}`,
     ].join('\n');
 
     const messages: ChatMsg[] = [
-      { role: 'system', content: `${buildSystemPrompt(this.config.pzServerName)}\n\n${trustedBlock}` },
+      { role: 'system', content: `${buildSystemPrompt(this.config.pzServerName, this.config.adminUserId)}\n\n${trustedBlock}` },
       ...history.slice(-20).map((m) => ({
         role: m.role === 'tool' ? ('tool' as const) : m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
         content: m.content,

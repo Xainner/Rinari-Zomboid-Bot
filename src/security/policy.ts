@@ -1,5 +1,5 @@
-export function isXainner(authorId: string, xainnerUserId: string): boolean {
-  return authorId === xainnerUserId;
+export function isAdmin(authorId: string, adminUserId: string): boolean {
+  return authorId === adminUserId;
 }
 
 export function hasMutationRole(memberRoleIds: string[], allowedRoleIds: string[]): boolean {
@@ -30,19 +30,19 @@ export function clampWarningMinutes(requested: number, min: number): number {
 
 export function decideMutation(params: {
   tool: MutationTool;
-  isXainnerUser: boolean;
+  isAdminUser: boolean;
   hasRole: boolean;
   config: {
     publicSave: boolean;
     publicRestart: boolean;
-    nonXainnerRestartMinWarning: number;
+    nonAdminRestartMinWarning: number;
     enableModTools: boolean;
     enableBroadcastTool: boolean;
   };
   warningMinutes?: number;
 }): PolicyDecision {
-  const { tool, isXainnerUser, hasRole, config } = params;
-  const privileged = isXainnerUser || hasRole;
+  const { tool, isAdminUser, hasRole, config } = params;
+  const privileged = isAdminUser || hasRole;
 
   switch (tool) {
     case 'save_world':
@@ -55,9 +55,9 @@ export function decideMutation(params: {
         return { allowed: true, reason: 'restart allowed for privileged' };
       }
       if (!config.publicRestart) return { allowed: false, reason: 'restart not public' };
-      const requested = params.warningMinutes ?? config.nonXainnerRestartMinWarning;
+      const requested = params.warningMinutes ?? config.nonAdminRestartMinWarning;
       try {
-        const clamped = clampWarningMinutes(requested, config.nonXainnerRestartMinWarning);
+        const clamped = clampWarningMinutes(requested, config.nonAdminRestartMinWarning);
         return { allowed: true, reason: 'restart allowed with minimum warning', clampedWarningMinutes: clamped };
       } catch {
         return { allowed: false, reason: 'warning_minutes out of range' };

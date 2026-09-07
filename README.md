@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/logo.png" alt="Rinari — Zomboid Discord Bot logo" width="240" />
   <h1>Rinari — Zomboid Discord Bot</h1>
-  <p><strong>Discord AI operator for the Project Zomboid server ARKNO2 via Zomboid Control Panel.</strong></p>
+  <p><strong>Discord AI operator for the Project Zomboid server in <code>PZ_SERVER_NAME</code> via Zomboid Control Panel.</strong></p>
   <p>
     <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node >=22" />
     <img src="https://img.shields.io/badge/typescript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -35,17 +35,17 @@
 
 ## Overview
 
-Rinari is an independent Discord service that converses through an OpenAI-compatible LLM and operates **only** the Project Zomboid server `ARKNO2` through Zomboid Control Panel.
+Rinari is an independent Discord service that converses through an OpenAI-compatible LLM and operates only the configured Project Zomboid server `$PZ_SERVER_NAME` through Zomboid Control Panel.
 
 Design principles:
 
 - Closed allowlist of panel endpoints. No generic HTTP, no arbitrary paths.
 - Policy enforced in code. The LLM requests tools; the runtime authorizes each execution.
-- Server identity check (`activeServer.serverName === ARKNO2`) before every mutation. Fail-closed.
+- Server identity check (`activeServer.serverName === $PZ_SERVER_NAME`) before every mutation. Fail-closed.
 - No host access: no shell, SSH, Docker, RCON free-form, file browsing, or panel administration.
 - Honest reporting: success is claimed only after a confirmed panel result.
 
-Verified against panel `v1.1.44` at `http://192.168.0.3:17050`, with `ARKNO2` as the active server.
+Verified against panel `v1.1.44` at `$PANEL_BASE_URL`, with `$PZ_SERVER_NAME` as the active server.
 
 ## Features
 
@@ -105,22 +105,22 @@ Copy `.env.example` to `.env` and complete the required values. The service fail
 | `DISCORD_TOKEN` | Yes | — | Discord bot token. |
 | `DISCORD_CLIENT_ID` | No | — | Application client ID. |
 | `DISCORD_GUILD_ID` | No | — | Guild ID for faster command registration. |
-| `DISCORD_CHANNEL_ID` | No | `1546326953815048263` | Only channel the bot answers in. |
-| `XAINNER_USER_ID` | No | `339977677811482634` | Owner Discord user ID (exact match). |
-| `OPENAI_BASE_URL` | Yes | `https://api.xainner.com/v1` | OpenAI-compatible base URL. |
+| `DISCORD_CHANNEL_ID` | Yes | — | Only channel the bot answers in. |
+| `ADMIN_USER_ID` | Yes | — | Admin Discord user ID (exact match). |
+| `OPENAI_BASE_URL` | Yes | — | OpenAI-compatible base URL. |
 | `OPENAI_API_KEY` | Yes | — | LLM API key. |
-| `OPENAI_MODEL` | Yes | `qwen3.8-27b-uncensored` | Chat model with tool calling. |
+| `OPENAI_MODEL` | Yes | — | Chat model with tool calling. |
 | `OPENAI_TEMPERATURE` | No | `0.8` | Sampling temperature. |
 | `OPENAI_MAX_TOKENS` | No | `700` | Max completion tokens. |
-| `PANEL_BASE_URL` | No | `http://192.168.0.3:17050` | Panel base URL (verified). |
-| `PANEL_USERNAME` | Yes | `rinari_bot` | Dedicated panel account. |
-| `PANEL_PASSWORD` | Yes | — | Panel password (admin-provided). |
-| `PZ_SERVER_NAME` | No | `ARKNO2` | Only server the bot may touch. |
-| `ENABLE_MOD_TOOLS` | No | `true` | Exposes mod status and update checks. |
-| `ENABLE_BROADCAST_TOOL` | No | `true` | Exposes server broadcast. |
+| `PANEL_BASE_URL` | No | `http://127.0.0.1:3001` | Panel base URL. |
+| `PANEL_USERNAME` | Yes | — | Dedicated panel account. |
+| `PANEL_PASSWORD` | Yes | — | Panel password. |
+| `PZ_SERVER_NAME` | Yes | — | Only server the bot may touch. |
+| `ENABLE_MOD_TOOLS` | No | `false` | Exposes mod status and update checks. |
+| `ENABLE_BROADCAST_TOOL` | No | `false` | Exposes server broadcast. |
 | `PUBLIC_SAVE` | No | `true` | Any channel user may save. |
 | `PUBLIC_RESTART` | No | `true` | Any channel user may restart with minimum warning. |
-| `NON_XAINNER_RESTART_MIN_WARNING` | No | `5` | Minimum warning minutes for non-privileged restarts (`0..60`). |
+| `NON_ADMIN_RESTART_MIN_WARNING` | No | `5` | Minimum warning minutes for non-privileged restarts (`0..60`). |
 | `MUTATION_ALLOWED_ROLE_IDS` | No | — | CSV of Discord role snowflakes allowed to run privileged mutations. |
 | `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`, `error`. |
 | `MAX_TOOL_ROUNDS` | No | `4` | Max LLM tool rounds per message. |
@@ -144,7 +144,7 @@ Copy `.env.example` to `.env` and complete the required values. The service fail
 | `broadcast_server_message` | `POST /api/server/message` | Privileged only if `ENABLE_BROADCAST_TOOL=true` (max 300 chars) |
 | `cancel_pending_mod_restart` | `POST /api/mods/cancel-pending-restart` | Privileged only if `ENABLE_MOD_TOOLS=true` |
 
-Owner is determined exclusively by `message.author.id`. Nicknames, usernames, and message content are untrusted. Non-owner restarts are clamped with `max(requested, NON_XAINNER_RESTART_MIN_WARNING)`.
+Owner is determined exclusively by `message.author.id`. Nicknames, usernames, and message content are untrusted. Non-owner restarts are clamped with `max(requested, NON_ADMIN_RESTART_MIN_WARNING)`.
 
 Explicitly out of scope in v1: force-stop, wipe, RCON free-form, mod install/delete, INI writes, Docker, panel restart, server switching.
 
@@ -153,15 +153,15 @@ Explicitly out of scope in v1: force-stop, wipe, RCON free-form, mod install/del
 1. Create the application in the Discord Developer Portal.
 2. Enable intents: `Guilds`, `GuildMessages`, `MessageContent` (`Server Members` only if role-based auth requires it).
 3. Invite the bot to the guild with permission to read and send messages in the target channel.
-4. Set `DISCORD_TOKEN` and `DISCORD_CHANNEL_ID=1546326953815048263`.
+4. Set `DISCORD_TOKEN` and `DISCORD_CHANNEL_ID=$DISCORD_CHANNEL_ID`.
 5. The bot ignores other channels, DMs, other bots, and webhooks, and disables mass mentions (`allowedMentions: { parse: [] }`).
 
 ## Panel setup
 
-1. Create a dedicated local account (suggested: `rinari_bot`).
+1. Create a dedicated local account (suggested: `$PANEL_USERNAME`).
 2. Create a custom role with the minimum capabilities: server status/control as needed, `players.view`, and `mods.manage` only if mod tools are enabled.
 3. Do not reuse the `technician` role or the main admin account. `mods.manage` also grants sensitive mod install and configuration operations, so the bot keeps a read/check-only allowlist even when the role includes it.
-4. Confirm the active server is exactly `ARKNO2` before enabling mutations.
+4. Confirm the active server is exactly `$PZ_SERVER_NAME` before enabling mutations.
 
 ## Development
 
@@ -200,7 +200,7 @@ sudo systemctl enable --now rinari-zomboid.service
 sudo journalctl -u rinari-zomboid.service -f
 ```
 
-Target directory on `casa3090`: `/opt/rinari-zomboid-bot`. Requires Node `>= 22`. Never restart Zomboid Control Panel or `ARKNO2` as part of this deploy.
+Target directory on `casa3090`: `/opt/rinari-zomboid-bot`. Requires Node `>= 22`. Never restart Zomboid Control Panel or `$PZ_SERVER_NAME` as part of this deploy.
 
 Rollback: stop the unit, restore the previous release directory, `daemon-reload`, start, and verify with preflight plus a `get_server_status` chat check.
 
@@ -222,9 +222,9 @@ Structured JSON logs to stdout (journald). Key events: `startup`, `discord_ready
 ## Security boundaries
 
 ```text
-TARGET SERVER = ARKNO2
-DISCORD CHANNEL = 1546326953815048263
-OWNER USER ID = 339977677811482634
+TARGET SERVER = $PZ_SERVER_NAME
+DISCORD CHANNEL = $DISCORD_CHANNEL_ID
+ADMIN USER ID = $ADMIN_USER_ID
 
 NO SHELL / NO SSH / NO DOCKER / NO GENERIC RCON
 NO GENERIC HTTP / NO FILE BROWSER

@@ -1,6 +1,6 @@
 import { PanelClient } from '../panel/client.js';
 import { AppConfig } from '../config.js';
-import { decideMutation, hasMutationRole, isXainner, MutationTool } from '../security/policy.js';
+import { decideMutation, hasMutationRole, isAdmin, MutationTool } from '../security/policy.js';
 import { assertKnownTool, isLifecycleTool, releaseLifecycleLock, tryAcquireLifecycleLock, validateToolArgs, ToolName } from './registry.js';
 import { logger } from '../util/logger.js';
 
@@ -30,7 +30,7 @@ export class ToolExecutor {
       const args = (rawArgs ?? {}) as Record<string, unknown>;
       validateToolArgs(tool as ToolName, args);
 
-      const privileged = isXainner(ctx.authorId, this.config.xainnerUserId);
+      const privileged = isAdmin(ctx.authorId, this.config.adminUserId);
       const hasRole = hasMutationRole(ctx.memberRoleIds, this.config.mutationAllowedRoleIds);
 
       if (this.isReadOnly(tool as ToolName)) {
@@ -51,12 +51,12 @@ export class ToolExecutor {
 
       const decision = decideMutation({
         tool: tool as MutationTool,
-        isXainnerUser: privileged,
+        isAdminUser: privileged,
         hasRole,
         config: {
           publicSave: this.config.publicSave,
           publicRestart: this.config.publicRestart,
-          nonXainnerRestartMinWarning: this.config.nonXainnerRestartMinWarning,
+          nonAdminRestartMinWarning: this.config.nonAdminRestartMinWarning,
           enableModTools: this.config.enableModTools,
           enableBroadcastTool: this.config.enableBroadcastTool,
         },

@@ -39,7 +39,7 @@ export interface AppConfig {
   discordClientId: string;
   discordGuildId: string;
   discordChannelId: string;
-  xainnerUserId: string;
+  adminUserId: string;
   openaiBaseUrl: string;
   openaiApiKey: string;
   openaiModel: string;
@@ -53,7 +53,7 @@ export interface AppConfig {
   enableBroadcastTool: boolean;
   publicSave: boolean;
   publicRestart: boolean;
-  nonXainnerRestartMinWarning: number;
+  nonAdminRestartMinWarning: number;
   mutationAllowedRoleIds: string[];
   logLevel: string;
   maxToolRounds: number;
@@ -71,14 +71,14 @@ export function loadConfig(): AppConfig {
     discordToken: required('DISCORD_TOKEN'),
     discordClientId: optional('DISCORD_CLIENT_ID'),
     discordGuildId: optional('DISCORD_GUILD_ID'),
-    discordChannelId: optional('DISCORD_CHANNEL_ID', '1546326953815048263'),
-    xainnerUserId: optional('XAINNER_USER_ID', '339977677811482634'),
+    discordChannelId: required('DISCORD_CHANNEL_ID'),
+    adminUserId: required('ADMIN_USER_ID'),
     openaiBaseUrl: required('OPENAI_BASE_URL'),
     openaiApiKey: required('OPENAI_API_KEY'),
     openaiModel: required('OPENAI_MODEL'),
     openaiTemperature: float('OPENAI_TEMPERATURE', 0.8),
     openaiMaxTokens: int('OPENAI_MAX_TOKENS', 700),
-    panelBaseUrl: optional('PANEL_BASE_URL', 'http://192.168.0.3:17050').replace(/\/$/, ''),
+    panelBaseUrl: optional('PANEL_BASE_URL', 'http://127.0.0.1:3001').replace(/\/$/, ''),
     panelUsername: required('PANEL_USERNAME'),
     panelPassword: required('PANEL_PASSWORD'),
     pzServerName: required('PZ_SERVER_NAME'),
@@ -86,7 +86,7 @@ export function loadConfig(): AppConfig {
     enableBroadcastTool: bool('ENABLE_BROADCAST_TOOL', false),
     publicSave: bool('PUBLIC_SAVE', true),
     publicRestart: bool('PUBLIC_RESTART', true),
-    nonXainnerRestartMinWarning: int('NON_XAINNER_RESTART_MIN_WARNING', 5),
+    nonAdminRestartMinWarning: int('NON_ADMIN_RESTART_MIN_WARNING', 5),
     mutationAllowedRoleIds: optional('MUTATION_ALLOWED_ROLE_IDS')
       .split(',')
       .map((s) => s.trim())
@@ -98,8 +98,8 @@ export function loadConfig(): AppConfig {
     llmTimeoutMs: int('LLM_TIMEOUT_MS', 90000),
     conversationDbPath: optional('CONVERSATION_DB_PATH', './data/conversations.sqlite'),
   };
-  if (cached.nonXainnerRestartMinWarning < 0 || cached.nonXainnerRestartMinWarning > 60) {
-    throw new Error('NON_XAINNER_RESTART_MIN_WARNING must be in range 0..60');
+  if (cached.nonAdminRestartMinWarning < 0 || cached.nonAdminRestartMinWarning > 60) {
+    throw new Error('NON_ADMIN_RESTART_MIN_WARNING must be in range 0..60');
   }
   return cached;
 }

@@ -2,7 +2,7 @@ import { Client, Events, GatewayIntentBits, Message, Partials } from 'discord.js
 import { AppConfig } from '../config.js';
 import { Orchestrator } from '../llm/orchestrator.js';
 import { progressForTool } from './progressMessages.js';
-import { isXainner } from '../security/policy.js';
+import { isAdmin } from '../security/policy.js';
 import { checkRateLimit } from '../security/rateLimit.js';
 import { sanitizeDiscord } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
@@ -32,7 +32,7 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
       if (!shouldHandleMessage(msg, config)) return;
       if (!checkRateLimit(msg.author.id)) return;
       const memberRoleIds = msg.member?.roles.cache.map((r) => r.id) ?? [];
-      const trustedXainner = isXainner(msg.author.id, config.xainnerUserId);
+      const adminUser = isAdmin(msg.author.id, config.adminUserId);
       const ch = msg.channel as { sendTyping?: () => Promise<unknown> };
       if (typeof ch.sendTyping === 'function') await ch.sendTyping().catch(() => undefined);
       const reply = await orchestrator.handle(
@@ -45,7 +45,7 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
         },
         {
           onToolStart: async (tool: string) => {
-            const progress = progressForTool(tool, trustedXainner, config.pzServerName);
+            const progress = progressForTool(tool, adminUser, config.pzServerName);
             if (progress) {
               await msg.reply({ content: sanitizeDiscord(progress), allowedMentions: { parse: [] } }).catch(() => undefined);
             }
