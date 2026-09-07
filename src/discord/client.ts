@@ -45,7 +45,7 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
         },
         {
           onToolStart: async (tool: string) => {
-            const progress = progressForTool(tool, trustedXainner);
+            const progress = progressForTool(tool, trustedXainner, config.pzServerName);
             if (progress) {
               await msg.reply({ content: sanitizeDiscord(progress), allowedMentions: { parse: [] } }).catch(() => undefined);
             }

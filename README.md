@@ -61,16 +61,17 @@ Verified against panel `v1.1.44` at `http://192.168.0.3:17050`, with `ARKNO2` as
 ## Architecture
 
 ```text
-Discord channel 1546326953815048263
+Discord channel ($DISCORD_CHANNEL_ID)
   -> discord.js v14 (Guilds, GuildMessages, MessageContent)
   -> routing (channel/bot/webhook/DM filter) + rate limit + typing indicator
-  -> Orchestrator (LLM tool loop, max 4 rounds / 3 calls per message)
-  -> ToolExecutor (policy check, ARKNO2 assert, lifecycle mutex)
+  -> Orchestrator (LLM tool loop, max $MAX_TOOL_ROUNDS rounds / $MAX_TOOL_CALLS_PER_MESSAGE calls per message)
+  -> ToolExecutor (policy check, server-identity assert, lifecycle mutex)
   -> PanelClient (closed methods, Bearer + single-flight refresh)
-  -> Zomboid Control Panel (http://192.168.0.3:17050)
+  -> Zomboid Control Panel ($PANEL_BASE_URL)
 
-LLM: https://api.xainner.com/v1 (qwen3.8-27b-uncensored)
-Memory: ./data/conversations.sqlite
+LLM: $OPENAI_BASE_URL ($OPENAI_MODEL)
+Target server: $PZ_SERVER_NAME (identity checked before every mutation)
+Memory: $CONVERSATION_DB_PATH
 ```
 
 ## Requirements

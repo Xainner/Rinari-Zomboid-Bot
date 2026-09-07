@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import { AppConfig } from '../config.js';
-import { SYSTEM_PROMPT } from './systemPrompt.js';
+import { buildSystemPrompt } from './systemPrompt.js';
 import { buildToolDefinitions, ToolDefinition } from '../tools/definitions.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { isLifecycleTool } from '../tools/registry.js';
@@ -97,6 +97,7 @@ export class Orchestrator {
     const tools = buildToolDefinitions({
       enableModTools: this.config.enableModTools,
       enableBroadcastTool: this.config.enableBroadcastTool,
+      serverName: this.config.pzServerName,
     });
 
     const trustedBlock = [
@@ -108,7 +109,7 @@ export class Orchestrator {
     ].join('\n');
 
     const messages: ChatMsg[] = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n\n${trustedBlock}` },
+      { role: 'system', content: `${buildSystemPrompt(this.config.pzServerName)}\n\n${trustedBlock}` },
       ...history.slice(-20).map((m) => ({
         role: m.role === 'tool' ? ('tool' as const) : m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
         content: m.content,

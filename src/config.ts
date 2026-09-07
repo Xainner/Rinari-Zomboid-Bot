@@ -81,7 +81,7 @@ export function loadConfig(): AppConfig {
     panelBaseUrl: optional('PANEL_BASE_URL', 'http://192.168.0.3:17050').replace(/\/$/, ''),
     panelUsername: required('PANEL_USERNAME'),
     panelPassword: required('PANEL_PASSWORD'),
-    pzServerName: optional('PZ_SERVER_NAME', 'ARKNO2'),
+    pzServerName: required('PZ_SERVER_NAME'),
     enableModTools: bool('ENABLE_MOD_TOOLS', false),
     enableBroadcastTool: bool('ENABLE_BROADCAST_TOOL', false),
     publicSave: bool('PUBLIC_SAVE', true),

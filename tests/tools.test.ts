@@ -19,7 +19,7 @@ describe('tools', () => {
   });
 
   it('no generic RCON tool exists', () => {
-    const tools = buildToolDefinitions({ enableModTools: true, enableBroadcastTool: true });
+    const tools = buildToolDefinitions({ enableModTools: true, enableBroadcastTool: true, serverName: 'ARKNO2' });
     const names = tools.map((t) => t.function.name);
     expect(names).not.toContain('rcon_execute');
     expect(names).not.toContain('panel_request');
@@ -27,7 +27,7 @@ describe('tools', () => {
   });
 
   it('conditional tools toggle', () => {
-    const off = buildToolDefinitions({ enableModTools: false, enableBroadcastTool: false });
+    const off = buildToolDefinitions({ enableModTools: false, enableBroadcastTool: false, serverName: 'ARKNO2' });
     const names = off.map((t) => t.function.name);
     expect(names).not.toContain('get_mod_status');
     expect(names).not.toContain('broadcast_server_message');
