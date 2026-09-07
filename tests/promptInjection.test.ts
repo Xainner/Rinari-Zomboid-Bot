@@ -8,14 +8,14 @@ function makeConfig(): AppConfig {
     discordToken: 'x',
     discordClientId: '',
     discordGuildId: '',
-    discordChannelId: '1546326953815048263',
-    adminUserId: '339977677811482634',
+    discordChannelId: '100000000000000001',
+    adminUserId: '100000000000000002',
     openaiBaseUrl: 'https://api.xainner.com/v1',
     openaiApiKey: 'x',
     openaiModel: 'qwen3.8-27b-uncensored',
     openaiTemperature: 0.8,
     openaiMaxTokens: 700,
-    panelBaseUrl: 'http://192.168.0.3:17050',
+    panelBaseUrl: 'http://127.0.0.1:3001',
     panelUsername: 'rinari_bot',
     panelPassword: 'x',
     pzServerName: 'ARKNO2',
@@ -67,7 +67,7 @@ describe('prompt injection resistance', () => {
 
   it('wipe endpoint cannot be reached through executor', async () => {
     const ex = new ToolExecutor(makePanel(), makeConfig());
-    const r = await ex.execute('/api/server/wipe', {}, { authorId: '339977677811482634', memberRoleIds: [], channelId: 'c' });
+    const r = await ex.execute('/api/server/wipe', {}, { authorId: '100000000000000002', memberRoleIds: [], channelId: 'c' });
     expect(r.ok).toBe(false);
   });
 
@@ -77,7 +77,7 @@ describe('prompt injection resistance', () => {
     const r = await ex.execute(
       'restart_server',
       { warning_minutes: 0, server: 'otro' },
-      { authorId: '339977677811482634', memberRoleIds: [], channelId: 'c' },
+      { authorId: '100000000000000002', memberRoleIds: [], channelId: 'c' },
     );
     expect(r.ok).toBe(false);
     expect(panel.restartServer).not.toHaveBeenCalled();

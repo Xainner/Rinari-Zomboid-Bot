@@ -8,14 +8,14 @@ function cfg(): AppConfig {
     discordToken: 'x',
     discordClientId: '',
     discordGuildId: '',
-    discordChannelId: '1546326953815048263',
-    adminUserId: '339977677811482634',
+    discordChannelId: '100000000000000001',
+    adminUserId: '100000000000000002',
     openaiBaseUrl: 'https://api.xainner.com/v1',
     openaiApiKey: 'x',
     openaiModel: 'qwen3.8-27b-uncensored',
     openaiTemperature: 0.8,
     openaiMaxTokens: 700,
-    panelBaseUrl: 'http://192.168.0.3:17050',
+    panelBaseUrl: 'http://127.0.0.1:3001',
     panelUsername: 'rinari_bot',
     panelPassword: 'x',
     pzServerName: 'ARKNO2',
@@ -43,7 +43,7 @@ function mockLlm(impl: (...args: any[]) => Promise<unknown>): any {
   return { chat: { completions: { create: vi.fn(impl) } } };
 }
 
-const MSG = { channelId: '1546326953815048263', authorId: '111', authorLabel: 'tester', memberRoleIds: [], text: 'hola' };
+const MSG = { channelId: '100000000000000001', authorId: '111', authorLabel: 'tester', memberRoleIds: [], text: 'hola' };
 
 describe('orchestrator resilience', () => {
   it('retries once on empty content with no tool calls', async () => {
