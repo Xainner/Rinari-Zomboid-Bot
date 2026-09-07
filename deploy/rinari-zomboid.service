@@ -1,0 +1,31 @@
+[Unit]
+Description=Rinari Project Zomboid Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rinari-zomboid
+Group=rinari-zomboid
+WorkingDirectory=/opt/rinari-zomboid-bot
+EnvironmentFile=/opt/rinari-zomboid-bot/.env
+ExecStart=/usr/bin/node /opt/rinari-zomboid-bot/dist/index.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
