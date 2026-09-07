@@ -95,7 +95,7 @@ export function loadConfig(): AppConfig {
     maxToolRounds: int('MAX_TOOL_ROUNDS', 4),
     maxToolCallsPerMessage: int('MAX_TOOL_CALLS_PER_MESSAGE', 3),
     panelTimeoutMs: int('PANEL_TIMEOUT_MS', 10000),
-    llmTimeoutMs: int('LLM_TIMEOUT_MS', 30000),
+    llmTimeoutMs: int('LLM_TIMEOUT_MS', 90000),
     conversationDbPath: optional('CONVERSATION_DB_PATH', './data/conversations.sqlite'),
   };
   if (cached.nonXainnerRestartMinWarning < 0 || cached.nonXainnerRestartMinWarning > 60) {

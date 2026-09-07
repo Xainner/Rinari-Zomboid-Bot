@@ -1,7 +1,7 @@
 import type OpenAI from 'openai';
 import { AppConfig } from '../config.js';
 import { SYSTEM_PROMPT } from './systemPrompt.js';
-import { buildToolDefinitions } from '../tools/definitions.js';
+import { buildToolDefinitions, ToolDefinition } from '../tools/definitions.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { isLifecycleTool } from '../tools/registry.js';
 import { ConversationStore } from '../state/conversationStore.js';
@@ -27,6 +27,18 @@ const MUTATION_TOOLS = new Set([
   'check_mod_updates',
 ]);
 
+interface ChatMsg {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: unknown[];
+}
+
+const EMPTY_FALLBACK =
+  'Se me fue la idea a mitad de frase. Preguntame de nuevo y te respondo bien.';
+const ERROR_FALLBACK =
+  'No logre comunicarme con el proveedor de IA justo ahora. Intentalo de nuevo en un momento.';
+
 export class Orchestrator {
   constructor(
     private llm: OpenAI,
@@ -35,7 +47,44 @@ export class Orchestrator {
     private store: ConversationStore,
   ) {}
 
+  private async chat(messages: ChatMsg[], tools?: ToolDefinition[]): Promise<OpenAI.Chat.ChatCompletion> {
+    return this.llm.chat.completions.create({
+      model: this.config.openaiModel,
+      temperature: this.config.openaiTemperature,
+      max_tokens: this.config.openaiMaxTokens,
+      messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
+      ...(tools ? { tools: tools as unknown as OpenAI.Chat.ChatCompletionTool[], tool_choice: 'auto' as const } : {}),
+    }) as Promise<OpenAI.Chat.ChatCompletion>;
+  }
+
+  private async chatWithRetry(messages: ChatMsg[], tools?: ToolDefinition[]): Promise<OpenAI.Chat.ChatCompletion> {
+    // The provider occasionally returns an empty message (no content, no tool
+    // calls). That transient case deserves one retry before giving up.
+    let res = await this.chat(messages, tools);
+    if (this.isEmpty(res) && tools !== undefined) {
+      logger.warn('llm_empty_response_retry', {});
+      res = await this.chat(messages, tools);
+    }
+    return res;
+  }
+
+  private isEmpty(res: OpenAI.Chat.ChatCompletion): boolean {
+    const msg = res.choices[0]?.message as { content?: string | null; tool_calls?: unknown[] } | undefined;
+    return !!msg && (msg.content?.trim() ?? '') === '' && (msg.tool_calls ?? []).length === 0;
+  }
+
   async handle(msg: IncomingMessage, hooks?: { onToolStart?: (tool: string) => Promise<void> }): Promise<string> {
+    try {
+      return await this.run(msg, hooks);
+    } catch (err) {
+      logger.error('llm_orchestration_failed', { error: err instanceof Error ? err.message : String(err) });
+      const clean = sanitizeDiscord(ERROR_FALLBACK);
+      await this.store.append(msg.channelId, { role: 'assistant', content: clean, ts: Date.now() }).catch(() => undefined);
+      return clean;
+    }
+  }
+
+  private async run(msg: IncomingMessage, hooks?: { onToolStart?: (tool: string) => Promise<void> }): Promise<string> {
     const trustedXainner = isXainner(msg.authorId, this.config.xainnerUserId);
     await this.store.append(msg.channelId, {
       role: 'user',
@@ -58,7 +107,6 @@ export class Orchestrator {
       `target_server=${this.config.pzServerName}`,
     ].join('\n');
 
-    type ChatMsg = { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_call_id?: string; tool_calls?: unknown[] };
     const messages: ChatMsg[] = [
       { role: 'system', content: `${SYSTEM_PROMPT}\n\n${trustedBlock}` },
       ...history.slice(-20).map((m) => ({
@@ -69,20 +117,13 @@ export class Orchestrator {
 
     let toolCallsMade = 0;
     for (let round = 0; round < this.config.maxToolRounds; round++) {
-      const res = await this.llm.chat.completions.create({
-        model: this.config.openaiModel,
-        temperature: this.config.openaiTemperature,
-        max_tokens: this.config.openaiMaxTokens,
-        messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
-        tools: tools as unknown as OpenAI.Chat.ChatCompletionTool[],
-        tool_choice: 'auto',
-      });
+      const res = await this.chatWithRetry(messages, tools);
       const choice = res.choices[0]?.message;
       if (!choice) break;
       const calls = choice.tool_calls ?? [];
       if (calls.length === 0) {
-        const text = choice.content?.trim() || '...';
-        const clean = sanitizeDiscord(text);
+        const raw = choice.content?.trim() || '';
+        const clean = sanitizeDiscord(raw === '' ? EMPTY_FALLBACK : raw);
         await this.store.append(msg.channelId, { role: 'assistant', content: clean, ts: Date.now() });
         return clean;
       }
@@ -122,13 +163,8 @@ export class Orchestrator {
       if (toolCallsMade >= this.config.maxToolCallsPerMessage) break;
     }
 
-    const res = await this.llm.chat.completions.create({
-      model: this.config.openaiModel,
-      temperature: this.config.openaiTemperature,
-      max_tokens: this.config.openaiMaxTokens,
-      messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
-    });
-    const finalText = sanitizeDiscord(res.choices[0]?.message?.content?.trim() || 'Listo. Revise ARKNO2 y reporte lo confirmado por el panel.');
+    const res = await this.chatWithRetry(messages);
+    const finalText = sanitizeDiscord(res.choices[0]?.message?.content?.trim() || EMPTY_FALLBACK);
     await this.store.append(msg.channelId, { role: 'assistant', content: finalText, ts: Date.now() });
     return finalText;
   }

@@ -125,7 +125,7 @@ Copy `.env.example` to `.env` and complete the required values. The service fail
 | `MAX_TOOL_ROUNDS` | No | `4` | Max LLM tool rounds per message. |
 | `MAX_TOOL_CALLS_PER_MESSAGE` | No | `3` | Max tool calls per message. |
 | `PANEL_TIMEOUT_MS` | No | `10000` | Panel HTTP timeout. |
-| `LLM_TIMEOUT_MS` | No | `30000` | LLM timeout. |
+| `LLM_TIMEOUT_MS` | No | `90000` | LLM timeout. |
 | `CONVERSATION_DB_PATH` | No | `./data/conversations.sqlite` | SQLite path for conversation memory. |
 
 ## Tools and permissions
