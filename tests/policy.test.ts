@@ -11,12 +11,12 @@ const base = {
 
 describe('policy', () => {
   it('recognizes Xainner by exact ID', () => {
-    expect(isAdmin('339977677811482634', '339977677811482634')).toBe(true);
-    expect(isAdmin('123', '339977677811482634')).toBe(false);
+    expect(isAdmin('100000000000000002', '100000000000000002')).toBe(true);
+    expect(isAdmin('123', '100000000000000002')).toBe(false);
   });
 
   it('same nickname but different ID is not Xainner', () => {
-    expect(isAdmin('999', '339977677811482634')).toBe(false);
+    expect(isAdmin('999', '100000000000000002')).toBe(false);
   });
 
   it('clamps non-admin restart to minimum', () => {
