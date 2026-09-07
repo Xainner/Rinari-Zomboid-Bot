@@ -115,18 +115,39 @@ export class PanelClient {
   }
 
   async getModStatus(): Promise<ModStatusResult> {
-    const status = await this.call<Record<string, unknown>>('GET', '/api/mods/status').catch(() => ({}));
-    const tracked = await this.call<unknown>('GET', '/api/mods/tracked').catch(() => []);
-    const sched = await this.call<Record<string, unknown>>('GET', '/api/scheduler/status').catch(() => ({}));
+    const status = await this.call<Record<string, unknown>>('GET', '/api/mods/status').catch(
+      (): Record<string, unknown> => ({}),
+    );
+    // NOTE: GET /api/mods/tracked returns { mods: [...] }, not a bare array.
+    const trackedRaw = await this.call<unknown>('GET', '/api/mods/tracked').catch(() => []);
+    const sched = await this.call<Record<string, unknown>>('GET', '/api/scheduler/status').catch(
+      (): Record<string, unknown> => ({}),
+    );
+    const trackedList = Array.isArray(trackedRaw)
+      ? trackedRaw
+      : Array.isArray((trackedRaw as Record<string, unknown>)?.['mods'])
+        ? ((trackedRaw as Record<string, unknown>)['mods'] as unknown[])
+        : [];
+    const tracked =
+      typeof status?.['totalModsTracked'] === 'number'
+        ? (status['totalModsTracked'] as number)
+        : trackedList.length;
+    const updatesAvailable =
+      typeof status?.['updatesAvailable'] === 'number'
+        ? (status['updatesAvailable'] as number)
+        : typeof status?.['modsNeedingUpdate'] === 'number'
+          ? (status['modsNeedingUpdate'] as number)
+          : 0;
     const pending =
       (status as Record<string, unknown>)?.['pendingRestart'] === true ||
       (sched as Record<string, unknown>)?.['pendingRestart'] === true;
-    const count = Array.isArray(tracked) ? tracked.length : 0;
     return {
       ok: true,
       server: this.opts.serverName,
-      summary: `Tracked mods: ${count}. Pending restart: ${pending ? 'yes' : 'no'}.`,
+      summary: `${tracked} mods bajo seguimiento de updates, ${updatesAvailable} con actualizacion disponible. Reinicio pendiente: ${pending ? 'si' : 'no'}.`,
       pendingRestart: pending,
+      tracked,
+      updatesAvailable,
     };
   }
 

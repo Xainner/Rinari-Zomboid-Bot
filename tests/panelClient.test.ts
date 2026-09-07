@@ -44,6 +44,30 @@ describe('panel client', () => {
     await expect(c.restartServer(5)).rejects.toMatchObject({ status: 409 });
   });
 
+  it('parses tracked mods wrapped in { mods }', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/mods/status')) return json({ totalModsTracked: 272, updatesAvailable: 0 });
+      if (url.endsWith('/api/mods/tracked')) return json({ mods: [{ workshop_id: '1' }, { workshop_id: '2' }] });
+      if (url.endsWith('/api/scheduler/status')) return json({});
+      return json({});
+    });
+    const r = await c.getModStatus();
+    expect(r.tracked).toBe(272);
+    expect(r.updatesAvailable).toBe(0);
+    expect(r.pendingRestart).toBe(false);
+  });
+
+  it('falls back to mods array length when status lacks totals', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/mods/status')) return json({});
+      if (url.endsWith('/api/mods/tracked')) return json({ mods: [{ workshop_id: '1' }] });
+      if (url.endsWith('/api/scheduler/status')) return json({});
+      return json({});
+    });
+    const r = await c.getModStatus();
+    expect(r.tracked).toBe(1);
+  });
+
   it('never leaks secrets in errors', async () => {
     const c = clientWithFetch(() => json({ error: 'bad' }, 500));
     try {

@@ -26,6 +26,8 @@ export interface ModStatusResult {
   server: string;
   summary: string;
   pendingRestart: boolean;
+  tracked: number;
+  updatesAvailable: number;
   raw?: unknown;
 }
 
