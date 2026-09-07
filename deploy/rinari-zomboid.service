@@ -13,6 +13,7 @@ ExecStart=/usr/bin/node /opt/rinari-zomboid-bot/dist/index.js
 Restart=on-failure
 RestartSec=5
 UMask=0077
+ReadWritePaths=/opt/rinari-zomboid-bot/data
 
 NoNewPrivileges=true
 PrivateTmp=true
