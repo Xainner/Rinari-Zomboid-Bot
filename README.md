@@ -31,11 +31,12 @@
 - [Troubleshooting](#troubleshooting)
 - [Security boundaries](#security-boundaries)
 - [Project structure](#project-structure)
+- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 ## Overview
 
-Rinari is an independent Discord service that converses through an OpenAI-compatible LLM and operates only the configured Project Zomboid server `$PZ_SERVER_NAME` through Zomboid Control Panel.
+Rinari is an independent Discord service that converses through an OpenAI-compatible LLM and operates **only** the Project Zomboid server `$PZ_SERVER_NAME` through [Zomboid Control Panel](https://github.com/fpsacha/zomboid-control-panel) by fpsacha — an excellent admin cockpit (server controls, RCON, live map, Workshop mods, scheduling, backups, Discord integration) that exposes the HTTP API this bot consumes.
 
 Design principles:
 
@@ -268,6 +269,10 @@ tests/
 deploy/
   rinari-zomboid.service
 ```
+
+## Acknowledgments
+
+This bot is built on top of [Zomboid Control Panel](https://github.com/fpsacha/zomboid-control-panel) by fpsacha (MIT licensed) — excellent work that made this integration possible. This is an independent project and is not affiliated with, endorsed by, or related to the panel's authors.
 
 ## License
 
