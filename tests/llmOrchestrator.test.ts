@@ -141,4 +141,39 @@ describe('orchestrator resilience', () => {
     expect(reply).not.toContain('get_console_logs');
     expect(reply.length).toBeGreaterThan(10);
   });
+
+  it('keeps thinking on for tool decisions but off for the final summary', async () => {
+    const toolCall = { id: 'call1', type: 'function', function: { name: 'get_players', arguments: '{}' } };
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(completion({ role: 'assistant', content: '', tool_calls: [toolCall] }))
+      .mockResolvedValueOnce(completion({ role: 'assistant', content: 'Hay 2 jugadores.' }));
+    const execute = vi.fn().mockResolvedValue({ ok: true, data: { count: 2 } });
+    const orch = new Orchestrator(
+      mockLlm(create),
+      { ...cfg(), maxToolCallsPerMessage: 1 },
+      { execute } as unknown as import('../src/tools/executor.js').ToolExecutor,
+      createConversationStore(),
+    );
+    const reply = await orch.handle(MSG);
+    expect(reply).toBe('Hay 2 jugadores.');
+    const bodies = create.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    expect(bodies).toHaveLength(2);
+    expect('chat_template_kwargs' in bodies[0]).toBe(false);
+    expect(bodies[1]).toMatchObject({ chat_template_kwargs: { enable_thinking: false } });
+  });
+
+  it('leaves thinking on for plain chat rounds', async () => {
+    const create = vi.fn().mockResolvedValue(completion({ role: 'assistant', content: 'Hola.' }));
+    const orch = new Orchestrator(
+      mockLlm(create),
+      cfg(),
+      { execute: vi.fn() } as unknown as import('../src/tools/executor.js').ToolExecutor,
+      createConversationStore(),
+    );
+    await orch.handle(MSG);
+    const bodies = create.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    expect(bodies).toHaveLength(1);
+    expect('chat_template_kwargs' in bodies[0]).toBe(false);
+  });
 });

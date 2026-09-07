@@ -58,23 +58,47 @@ export class Orchestrator {
     private store: ConversationStore,
   ) {}
 
-  private async chat(messages: ChatMsg[], tools?: ToolDefinition[]): Promise<OpenAI.Chat.ChatCompletion> {
-    return this.llm.chat.completions.create({
-      model: this.config.openaiModel,
-      temperature: this.config.openaiTemperature,
-      max_tokens: this.config.openaiMaxTokens,
-      messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
-      ...(tools ? { tools: tools as unknown as OpenAI.Chat.ChatCompletionTool[], tool_choice: 'auto' as const } : {}),
-    }) as Promise<OpenAI.Chat.ChatCompletion>;
+  private async chat(
+    messages: ChatMsg[],
+    tools?: ToolDefinition[],
+    opts?: { thinking?: boolean; leg?: string; round?: number },
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    const started = Date.now();
+    try {
+      const params = {
+        model: this.config.openaiModel,
+        temperature: this.config.openaiTemperature,
+        max_tokens: this.config.openaiMaxTokens,
+        messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
+        ...(tools ? { tools: tools as unknown as OpenAI.Chat.ChatCompletionTool[], tool_choice: 'auto' as const } : {}),
+        // Per-request thinking toggle (the backend honours chat_template_kwargs).
+        // Thinking stays ON for tool-decision legs where it matters and goes
+        // OFF only for the pure-redaction final leg.
+        ...(opts?.thinking === false ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+      } as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
+      const res = await this.llm.chat.completions.create(params);
+      return res as unknown as OpenAI.Chat.ChatCompletion;
+    } finally {
+      logger.info('llm_leg', {
+        leg: opts?.leg ?? 'unknown',
+        round: opts?.round,
+        thinking: opts?.thinking !== false,
+        durationMs: Date.now() - started,
+      });
+    }
   }
 
-  private async chatWithRetry(messages: ChatMsg[], tools?: ToolDefinition[]): Promise<OpenAI.Chat.ChatCompletion> {
+  private async chatWithRetry(
+    messages: ChatMsg[],
+    tools?: ToolDefinition[],
+    opts?: { thinking?: boolean; leg?: string; round?: number },
+  ): Promise<OpenAI.Chat.ChatCompletion> {
     // The provider occasionally returns an empty message (no content, no tool
     // calls). That transient case deserves one retry before giving up.
-    let res = await this.chat(messages, tools);
+    let res = await this.chat(messages, tools, opts);
     if (this.isEmpty(res) && tools !== undefined) {
       logger.warn('llm_empty_response_retry', {});
-      res = await this.chat(messages, tools);
+      res = await this.chat(messages, tools, opts);
     }
     return res;
   }
@@ -129,7 +153,7 @@ export class Orchestrator {
 
     let toolCallsMade = 0;
     for (let round = 0; round < this.config.maxToolRounds; round++) {
-      const res = await this.chatWithRetry(messages, tools);
+      const res = await this.chatWithRetry(messages, tools, { leg: 'tool_round', round });
       const choice = res.choices[0]?.message;
       if (!choice) break;
       const calls = choice.tool_calls ?? [];
@@ -180,7 +204,7 @@ export class Orchestrator {
       if (toolCallsMade >= this.config.maxToolCallsPerMessage) break;
     }
 
-    const res = await this.chatWithRetry(messages);
+    const res = await this.chatWithRetry(messages, undefined, { thinking: false, leg: 'final' });
     const finalRaw = res.choices[0]?.message?.content?.trim() || '';
     const finalText = sanitizeDiscord(looksLikePseudoToolCall(finalRaw) || finalRaw === '' ? EMPTY_FALLBACK : finalRaw);
     await this.store.append(msg.channelId, { role: 'assistant', content: finalText, ts: Date.now() });
