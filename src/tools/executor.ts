@@ -23,6 +23,14 @@ export class ToolExecutor {
     private config: AppConfig,
   ) {}
 
+  private lastLifecycleAt = new Map<string, number>();
+
+  private static readonly LIFECYCLE_DEDUPE_MS = 120_000;
+
+  static resetLifecycleDedupeForTests(executor: ToolExecutor): void {
+    executor.lastLifecycleAt.clear();
+  }
+
   async execute(tool: string, rawArgs: unknown, ctx: ExecutionContext): Promise<ExecutionResult> {
     const started = Date.now();
     try {
@@ -80,7 +88,34 @@ export class ToolExecutor {
           return { ok: false, denied: true, error: 'Another lifecycle operation is already in progress' };
         }
         try {
+          const sinceLast = Date.now() - (this.lastLifecycleAt.get(tool) ?? 0);
+          if (sinceLast < ToolExecutor.LIFECYCLE_DEDUPE_MS) {
+            const waitS = Math.ceil((ToolExecutor.LIFECYCLE_DEDUPE_MS - sinceLast) / 1000);
+            logger.info('tool_execution', {
+              tool,
+              requesterId: ctx.authorId,
+              server: this.config.pzServerName,
+              authorized: false,
+              durationMs: Date.now() - started,
+              ok: false,
+            });
+            return {
+              ok: false,
+              denied: true,
+              error: `${tool} was already executed ${Math.floor(sinceLast / 1000)}s ago. Not repeating it; wait ${waitS}s before asking again.`,
+            };
+          }
           const data = await this.runMutation(tool as ToolName, args, decision.clampedWarningMinutes);
+          this.lastLifecycleAt.set(tool, Date.now());
+          logger.info('tool_execution', {
+            tool,
+            requesterId: ctx.authorId,
+            server: this.config.pzServerName,
+            authorized: true,
+            durationMs: Date.now() - started,
+            ok: true,
+            args: ToolExecutor.safeArgs(tool as ToolName, args, decision.clampedWarningMinutes),
+          });
           return { ok: true, data };
         } finally {
           releaseLifecycleLock();
@@ -108,6 +143,16 @@ export class ToolExecutor {
       });
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  private static safeArgs(tool: ToolName, args: Record<string, unknown>, clampedWarning?: number): Record<string, unknown> {
+    if (tool === 'restart_server') {
+      return { warning_minutes: clampedWarning ?? args['warning_minutes'] };
+    }
+    if (tool === 'broadcast_server_message') {
+      return { message_length: typeof args['message'] === 'string' ? args['message'].length : 0 };
+    }
+    return {};
   }
 
   private isReadOnly(tool: ToolName): boolean {
