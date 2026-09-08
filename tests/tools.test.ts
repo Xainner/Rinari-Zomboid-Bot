@@ -32,4 +32,21 @@ describe('tools', () => {
     expect(names).not.toContain('get_mod_status');
     expect(names).not.toContain('broadcast_server_message');
   });
+
+  it('player stats tools are always registered', () => {
+    const tools = buildToolDefinitions({ enableModTools: false, enableBroadcastTool: false, serverName: 'ARKNO2' });
+    const names = tools.map((t) => t.function.name);
+    expect(names).toContain('get_player_hours');
+    expect(names).toContain('get_player_activity');
+  });
+
+  it('validates player activity args', () => {
+    expect(() => validateToolArgs('get_player_hours', { player_name: 'Wachita' })).not.toThrow();
+    expect(() => validateToolArgs('get_player_hours', { player_name: '' })).toThrow();
+    expect(() => validateToolArgs('get_player_hours', { player_name: 'x', server: 'otro' } as unknown as Record<string, unknown>)).toThrow();
+    expect(() => validateToolArgs('get_player_activity', { action: 'ban' })).toThrow();
+    expect(() => validateToolArgs('get_player_activity', { action: 'death', limit: 5 })).not.toThrow();
+    expect(() => validateToolArgs('get_player_activity', { limit: 0 })).toThrow();
+    expect(() => validateToolArgs('get_player_activity', { limit: 21 })).toThrow();
+  });
 });

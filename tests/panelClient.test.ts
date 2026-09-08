@@ -77,4 +77,93 @@ describe('panel client', () => {
       expect(String(err)).not.toContain('tok');
     }
   });
+
+  it('ranks player hours desc and caps at top 10', async () => {
+    const stats = Array.from({ length: 12 }, (_, i) => ({
+      player_name: `P${i}`,
+      total_playtime_seconds: (i + 1) * 3600,
+      session_count: i + 1,
+      first_seen: '2026-08-13T00:00:00.000Z',
+      last_seen: '2026-09-08T00:00:00.000Z',
+      last_session_start: null,
+    }));
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/players/stats')) return json({ stats });
+      return json({});
+    });
+    const r = await c.getPlayerHours();
+    expect(r.scope).toBe('ranking');
+    expect(r.tracked).toBe(12);
+    expect(r.ranking).toHaveLength(10);
+    expect(r.ranking![0].player).toBe('P11');
+    expect(r.ranking![0].hours).toBe(12);
+    expect(r.ranking![0].online).toBe(false);
+  });
+
+  it('adds the live ongoing session to hours', async () => {
+    const start = new Date(Date.now() - 3600 * 1000).toISOString();
+    const c = clientWithFetch((url) => {
+      if (url.includes('/api/players/stats/')) {
+        return json({
+          stat: {
+            player_name: 'Wachita',
+            total_playtime_seconds: 3600,
+            session_count: 3,
+            first_seen: '2026-08-13T00:00:00.000Z',
+            last_seen: start,
+            last_session_start: start,
+          },
+        });
+      }
+      return json({});
+    });
+    const r = await c.getPlayerHours('wachita');
+    expect(r.scope).toBe('player');
+    expect(r.found).toBe(true);
+    expect(r.entry!.online).toBe(true);
+    // 1h stored + ~1h live session
+    expect(r.entry!.hours).toBeGreaterThanOrEqual(1.9);
+    expect(r.entry!.hours).toBeLessThan(2.5);
+  });
+
+  it('reports unknown player as not found', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.includes('/api/players/stats/')) return json({ stat: null });
+      return json({});
+    });
+    const r = await c.getPlayerHours('Nadie');
+    expect(r.found).toBe(false);
+    expect(r.entry).toBeUndefined();
+  });
+
+  it('filters activity by player and hides moderation actions', async () => {
+    const logs = [
+      { player_name: 'Diegol', action: 'death', details: 'non-pvp death at (1,2,0)', logged_at: '2026-09-08T01:00:00.000Z' },
+      { player_name: 'Diegol', action: 'kick', details: 'kicked', logged_at: '2026-09-08T01:01:00.000Z' },
+      { player_name: 'Otro', action: 'death', details: 'PvP death at (3,4,0)', logged_at: '2026-09-08T01:02:00.000Z' },
+      { player_name: 'DIEGOL', action: 'connect', details: 'Player connected to server', logged_at: '2026-09-08T01:03:00.000Z' },
+    ];
+    const c = clientWithFetch((url) => {
+      if (url.includes('/api/players/activity')) return json({ success: true, logs });
+      return json({});
+    });
+    const r = await c.getPlayerActivity('diegol', 'death', 10);
+    expect(r.count).toBe(1);
+    expect(r.events[0]).toMatchObject({ player: 'Diegol', action: 'death' });
+  });
+
+  it('caps activity limit', async () => {
+    const logs = Array.from({ length: 25 }, () => ({
+      player_name: 'P',
+      action: 'connect',
+      details: 'x',
+      logged_at: '2026-09-08T01:00:00.000Z',
+    }));
+    const c = clientWithFetch((url) => {
+      if (url.includes('/api/players/activity')) return json({ success: true, logs });
+      return json({});
+    });
+    const r = await c.getPlayerActivity(undefined, undefined, 20);
+    expect(r.count).toBe(20);
+  });
 });

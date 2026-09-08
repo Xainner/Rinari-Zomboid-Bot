@@ -136,6 +136,8 @@ Copy `.env.example` to `.env` and complete the required values. The service fail
 | --- | --- | --- |
 | `get_server_status` | `GET /api/servers/active`, `GET /api/servers/active/status` | Everyone in channel |
 | `get_players` | `GET /api/players` | Everyone in channel |
+| `get_player_hours` | `GET /api/players/stats`, `GET /api/players/stats/:player` | Everyone in channel (panel-tracked playtime, not Steam hours) |
+| `get_player_activity` | `GET /api/players/activity` | Everyone in channel (connects, disconnects, deaths only) |
 | `get_mod_status` | `GET /api/mods/status`, `GET /api/mods/tracked`, `GET /api/scheduler/status` | Everyone if `ENABLE_MOD_TOOLS=true` |
 | `check_mod_updates` | `POST /api/mods/check-updates` | Everyone if `ENABLE_MOD_TOOLS=true` |
 | `save_world` | `POST /api/server/save` | Everyone if `PUBLIC_SAVE=true`, else privileged |
