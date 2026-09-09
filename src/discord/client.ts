@@ -16,6 +16,27 @@ export function shouldHandleMessage(msg: Message, config: AppConfig): boolean {
   return true;
 }
 
+type SendableChannel = {
+  sendTyping?: () => Promise<unknown>;
+  send?: (opts: { content: string; allowedMentions: { parse: [] } }) => Promise<unknown>;
+};
+
+async function sendReply(msg: Message, content: string): Promise<void> {
+  const opts = { content, allowedMentions: { parse: [] as [] } };
+  try {
+    await msg.reply(opts);
+    return;
+  } catch (err) {
+    // Source message may be deleted; fall back to a plain channel message.
+    logger.warn('discord_reply_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    await (msg.channel as SendableChannel).send?.(opts);
+  } catch (err) {
+    logger.error('discord_send_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export function createDiscordClient(config: AppConfig, orchestrator: Orchestrator): Client {
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -28,13 +49,19 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
   });
 
   client.on(Events.MessageCreate, async (msg: Message) => {
+    let typingTimer: NodeJS.Timeout | null = null;
     try {
       if (!shouldHandleMessage(msg, config)) return;
       if (!checkRateLimit(msg.author.id)) return;
       const memberRoleIds = msg.member?.roles.cache.map((r) => r.id) ?? [];
       const adminUser = isAdmin(msg.author.id, config.adminUserId);
-      const ch = msg.channel as { sendTyping?: () => Promise<unknown> };
-      if (typeof ch.sendTyping === 'function') await ch.sendTyping().catch(() => undefined);
+      const ch = msg.channel as SendableChannel;
+      const pokeTyping = (): void => {
+        if (typeof ch.sendTyping === 'function') ch.sendTyping().catch(() => undefined);
+      };
+      pokeTyping();
+      // Discord typing expires after ~10s; refresh while slow LLM legs run.
+      typingTimer = setInterval(pokeTyping, 8000);
       const reply = await orchestrator.handle(
         {
           channelId: msg.channelId,
@@ -47,17 +74,19 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
           onToolStart: async (tool: string) => {
             const progress = progressForTool(tool, adminUser, config.pzServerName);
             if (progress) {
-              await msg.reply({ content: sanitizeDiscord(progress), allowedMentions: { parse: [] } }).catch(() => undefined);
+              await sendReply(msg, sanitizeDiscord(progress));
             }
           },
         },
       );
       const chunks = splitDiscord(reply);
       for (const chunk of chunks) {
-        await msg.reply({ content: chunk, allowedMentions: { parse: [] } }).catch(() => undefined);
+        await sendReply(msg, chunk);
       }
     } catch (err) {
       logger.error('discord_message_failed', { error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      if (typingTimer) clearInterval(typingTimer);
     }
   });
 

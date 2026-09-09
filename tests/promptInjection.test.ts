@@ -82,4 +82,17 @@ describe('prompt injection resistance', () => {
     expect(r.ok).toBe(false);
     expect(panel.restartServer).not.toHaveBeenCalled();
   });
+
+  it('does not repeat a lifecycle mutation within the dedupe window', async () => {
+    const panel = makePanel();
+    panel.restartServer.mockResolvedValue({ ok: true });
+    const ex = new ToolExecutor(panel, makeConfig());
+    const ctx = { authorId: '100000000000000002', memberRoleIds: [], channelId: 'c' };
+    const first = await ex.execute('restart_server', { warning_minutes: 5 }, ctx);
+    expect(first.ok).toBe(true);
+    const second = await ex.execute('restart_server', { warning_minutes: 5 }, ctx);
+    expect(second.ok).toBe(false);
+    expect(second.denied).toBe(true);
+    expect(panel.restartServer).toHaveBeenCalledTimes(1);
+  });
 });
