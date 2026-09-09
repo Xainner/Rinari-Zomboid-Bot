@@ -12,6 +12,12 @@ export type ToolName =
   | 'get_world_info'
   | 'get_recent_errors'
   | 'get_player_position'
+  | 'kick_player'
+  | 'ban_player'
+  | 'unban_player'
+  | 'teleport_player'
+  | 'give_item'
+  | 'set_godmode'
   | 'get_mod_status'
   | 'check_mod_updates'
   | 'save_world'
@@ -62,6 +68,12 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
     get_world_info: [],
     get_recent_errors: ['limit'],
     get_player_position: ['player_name'],
+    kick_player: ['player_name', 'reason'],
+    ban_player: ['player_name', 'ban_ip', 'reason'],
+    unban_player: ['player_name'],
+    teleport_player: ['player_name', 'target_player', 'x', 'y', 'z'],
+    give_item: ['player_name', 'item', 'count'],
+    set_godmode: ['player_name', 'enabled'],
     get_mod_status: [],
     check_mod_updates: [],
     save_world: [],
@@ -129,10 +141,60 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
       throw new Error('player_name must be a string of length 1..64');
     }
   }
+  if (name === 'kick_player' || name === 'ban_player' || name === 'unban_player' || name === 'set_godmode') {
+    const p = args['player_name'];
+    if (typeof p !== 'string' || p.trim().length < 1 || p.length > 64) {
+      throw new Error('player_name is required (string, 1..64 chars)');
+    }
+  }
+  if (name === 'kick_player' || name === 'ban_player') {
+    const r = args['reason'];
+    if (r !== undefined && (typeof r !== 'string' || r.length > 256)) {
+      throw new Error('reason must be a string of at most 256 characters');
+    }
+  }
+  if (name === 'ban_player') {
+    const b = args['ban_ip'];
+    if (b !== undefined && typeof b !== 'boolean') throw new Error('ban_ip must be a boolean');
+  }
+  if (name === 'teleport_player') {
+    for (const k of ['x', 'y', 'z'] as const) {
+      const v = args[k];
+      if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v))) {
+        throw new Error(`${k} must be a number`);
+      }
+    }
+    const t = args['target_player'];
+    if (t !== undefined && (typeof t !== 'string' || (t as string).trim().length < 1 || (t as string).length > 64)) {
+      throw new Error('target_player must be a string of length 1..64');
+    }
+  }
+  if (name === 'give_item') {
+    const i = args['item'];
+    if (typeof i !== 'string' || (i as string).length < 1 || (i as string).length > 64) {
+      throw new Error('item is required (string like Base.Axe, 1..64 chars)');
+    }
+    const c = args['count'];
+    if (c !== undefined && (!Number.isInteger(c) || (c as number) < 1 || (c as number) > 100)) {
+      throw new Error('count must be an integer in range 1..100');
+    }
+  }
+  if (name === 'set_godmode') {
+    if (typeof args['enabled'] !== 'boolean') throw new Error('enabled is required (boolean)');
+  }
 }
 
 /**
- * Read tools restricted to the admin user only (no role bypass).
- * Everything else read-only is public to the channel.
+ * Tools restricted to the admin user only (no role bypass).
+ * Reads here are admin-only data; moderation tools have real consequences.
  */
-export const ADMIN_ONLY_TOOLS: ReadonlySet<string> = new Set(['get_recent_errors', 'get_player_position']);
+export const ADMIN_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'get_recent_errors',
+  'get_player_position',
+  'kick_player',
+  'ban_player',
+  'unban_player',
+  'teleport_player',
+  'give_item',
+  'set_godmode',
+]);

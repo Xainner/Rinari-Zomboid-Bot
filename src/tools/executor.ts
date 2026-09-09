@@ -44,17 +44,33 @@ export class ToolExecutor {
 
       // Admin-only tools: no role bypass, no exceptions. The LLM is told
       // these fail for anyone else, so it should not offer them publicly.
-      if (ADMIN_ONLY_TOOLS.has(tool) && !privileged) {
+      // Privileged requests run directly: these tools bypass decideMutation
+      // (which only knows the classic mutation set).
+      if (ADMIN_ONLY_TOOLS.has(tool)) {
+        if (!privileged) {
+          logger.info('tool_execution', {
+            tool,
+            requesterId: ctx.authorId,
+            server: this.config.pzServerName,
+            authorized: false,
+            durationMs: Date.now() - started,
+            ok: false,
+            error: 'admin only',
+          });
+          return { ok: false, denied: true, error: 'Solo Xainner puede usar esa herramienta.' };
+        }
+        const data = this.isReadOnly(tool as ToolName)
+          ? await this.runRead(tool as ToolName, args)
+          : await this.runMutation(tool as ToolName, args, undefined);
         logger.info('tool_execution', {
           tool,
           requesterId: ctx.authorId,
           server: this.config.pzServerName,
-          authorized: false,
+          authorized: true,
           durationMs: Date.now() - started,
-          ok: false,
-          error: 'admin only',
+          ok: true,
         });
-        return { ok: false, denied: true, error: 'Solo Xainner puede usar esa herramienta.' };
+        return { ok: true, data };
       }
 
       if (this.isReadOnly(tool as ToolName)) {
@@ -253,6 +269,35 @@ export class ToolExecutor {
         return this.panel.cancelPendingModRestart();
       case 'check_mod_updates':
         return this.panel.checkModUpdates();
+      case 'kick_player':
+        return this.panel.kickPlayer(
+          args['player_name'] as string,
+          args['reason'] as string | undefined,
+        );
+      case 'ban_player':
+        return this.panel.banPlayer(
+          args['player_name'] as string,
+          args['ban_ip'] as boolean | undefined,
+          args['reason'] as string | undefined,
+        );
+      case 'unban_player':
+        return this.panel.unbanPlayer(args['player_name'] as string);
+      case 'teleport_player':
+        return this.panel.teleportPlayer(
+          args['player_name'] as string,
+          args['target_player'] as string | undefined,
+          args['x'] as number | undefined,
+          args['y'] as number | undefined,
+          args['z'] as number | undefined,
+        );
+      case 'give_item':
+        return this.panel.giveItem(
+          args['player_name'] as string,
+          args['item'] as string,
+          typeof args['count'] === 'number' ? (args['count'] as number) : undefined,
+        );
+      case 'set_godmode':
+        return this.panel.setGodmode(args['player_name'] as string, args['enabled'] as boolean);
       default:
         throw new Error(`Not a mutation tool: ${tool}`);
     }

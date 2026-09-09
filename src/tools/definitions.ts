@@ -170,6 +170,106 @@ export function buildToolDefinitions(opts: ToolBuildOptions): ToolDefinition[] {
     {
       type: 'function',
       function: {
+        name: 'kick_player',
+        description: `Expulsa a un jugador de ${serverName} (puede reconectar). Solo Xainner.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64 },
+            reason: { type: 'string', maxLength: 256, description: 'Motivo visible para el jugador.' },
+          },
+          required: ['player_name'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'ban_player',
+        description: `Banea a un jugador de ${serverName} por nombre (con ban_ip opcional tambien su IP). Solo Xainner. Tiene consecuencias reales: usalo solo cuando te lo pida claramente.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64 },
+            ban_ip: { type: 'boolean', description: 'Si true, banea tambien la IP.' },
+            reason: { type: 'string', maxLength: 256 },
+          },
+          required: ['player_name'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'unban_player',
+        description: `Levanta el baneo por nombre en ${serverName}. Solo Xainner.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64 },
+          },
+          required: ['player_name'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'teleport_player',
+        description: `Teletransporta a un jugador de ${serverName} hacia otro jugador O a coordenadas x/y/z (una de las dos formas, no ambas). Solo Xainner.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64, description: 'Quien es teletransportado.' },
+            target_player: { type: 'string', minLength: 1, maxLength: 64, description: 'Destino: otro jugador.' },
+            x: { type: 'number', minimum: 0, maximum: 24000 },
+            y: { type: 'number', minimum: 0, maximum: 24000 },
+            z: { type: 'number', minimum: 0, maximum: 8, description: 'Piso, default 0.' },
+          },
+          required: ['player_name'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'give_item',
+        description: `Da un item a un jugador de ${serverName} via RCON (lo ve sin reloguear). Solo Xainner.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64 },
+            item: { type: 'string', minLength: 1, maxLength: 64, description: 'Formato Modulo.Item, ej. Base.Axe.' },
+            count: { type: 'integer', minimum: 1, maximum: 100, description: 'Default 1.' },
+          },
+          required: ['player_name', 'item'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'set_godmode',
+        description: `Activa o desactiva godmode a un jugador de ${serverName}. Solo Xainner. Si el bridge esta caido el panel lo intenta por RCON con limitaciones (te avisara en el resultado).`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64 },
+            enabled: { type: 'boolean' },
+          },
+          required: ['player_name', 'enabled'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'save_world',
         description: `Solicita al panel guardar el mundo de ${serverName}.`,
         parameters: { type: 'object', properties: {}, additionalProperties: false },
@@ -273,6 +373,12 @@ export const ALLOWED_TOOL_NAMES = new Set([
   'get_world_info',
   'get_recent_errors',
   'get_player_position',
+  'kick_player',
+  'ban_player',
+  'unban_player',
+  'teleport_player',
+  'give_item',
+  'set_godmode',
   'get_mod_status',
   'check_mod_updates',
   'save_world',

@@ -292,4 +292,77 @@ describe('panel client', () => {
     const missing = await c.getPlayerPosition('Nadie');
     expect(missing.found).toBe(false);
   });
+
+  function modClient(handler: (url: string, init?: RequestInit) => unknown): { client: PanelClient; calls: Array<{ url: string; body: unknown }> } {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const c = clientWithFetch((url, init) => {
+      let body: unknown;
+      try {
+        body = init?.body ? JSON.parse(init.body as string) : undefined;
+      } catch {
+        body = undefined;
+      }
+      calls.push({ url, body });
+      return handler(url, init);
+    });
+    return { client: c, calls };
+  }
+
+  const ACTIVE = (url: string) => {
+    if (url.endsWith('/api/servers/active')) return json({ server: { serverName: 'ARKNO2' } });
+    return json({ success: true });
+  };
+
+  it('kicks with reason and asserts active server first', async () => {
+    const { client, calls } = modClient(ACTIVE);
+    const r = await client.kickPlayer('Troll', 'spam');
+    expect(r.player).toBe('Troll');
+    expect(calls[0].url).toContain('/api/servers/active');
+    const kick = calls.find((x) => x.url.endsWith('/api/players/kick'));
+    expect(kick?.body).toEqual({ username: 'Troll', reason: 'spam' });
+  });
+
+  it('blocks moderation on server mismatch', async () => {
+    const { client } = modClient((url) => {
+      if (url.endsWith('/api/servers/active')) return json({ server: { serverName: 'OTRO' } });
+      return json({ success: true });
+    });
+    await expect(client.banPlayer('Troll')).rejects.toMatchObject({ name: 'PolicyError' });
+  });
+
+  it('treats panel success:false as failure, not success', async () => {
+    const { client } = modClient((url) => {
+      if (url.endsWith('/api/servers/active')) return json({ server: { serverName: 'ARKNO2' } });
+      return json({ success: false, error: 'Player not found' });
+    });
+    await expect(client.kickPlayer('Fantasma')).rejects.toThrow(/Player not found/);
+  });
+
+  it('validates teleport forms and ranges', async () => {
+    const { client, calls } = modClient(ACTIVE);
+    await expect(client.teleportPlayer('A', 'B', 1, 2)).rejects.toThrow(/not both/);
+    await expect(client.teleportPlayer('A')).rejects.toThrow(/target_player or x/);
+    await expect(client.teleportPlayer('A', undefined, -5, 10)).rejects.toThrow(/x must be/);
+    await client.teleportPlayer('A', 'B');
+    expect(calls.find((x) => x.url.endsWith('/api/players/teleport'))?.body).toEqual({ player1: 'A', player2: 'B' });
+  });
+
+  it('validates item format and count', async () => {
+    const { client } = modClient(ACTIVE);
+    await expect(client.giveItem('A', 'not-an-item')).rejects.toThrow(/Module\.ItemName/);
+    await expect(client.giveItem('A', 'Base.Axe', 101)).rejects.toThrow(/1\.\.100/);
+    const r = await client.giveItem('A', 'Base.Axe', 2);
+    expect(r.player).toBe('A');
+  });
+
+  it('passes godmode through with via/warning', async () => {
+    const { client } = modClient((url) => {
+      if (url.endsWith('/api/servers/active')) return json({ server: { serverName: 'ARKNO2' } });
+      if (url.endsWith('/api/players/godmode')) return json({ success: true, via: 'rcon', warning: 'PanelBridge is offline' });
+      return json({});
+    });
+    const r = await client.setGodmode('A', true);
+    expect(r.via).toBe('rcon');
+    expect(r.warning).toContain('offline');
+  });
 });

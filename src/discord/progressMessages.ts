@@ -15,6 +15,18 @@ export function progressForTool(tool: string, isAdmin: boolean, serverName: stri
         return `Reviso los mods de ${serverName}, Xainner. Sin tocar nada mas.`;
       case 'cancel_pending_mod_restart':
         return `Reviso el reinicio pendiente de ${serverName}, Xainner.`;
+      case 'kick_player':
+        return `Voy, Xainner. Expulso al jugador de ${serverName}.`;
+      case 'ban_player':
+        return `Entendido, Xainner. Baneo al jugador de ${serverName}. Esto es serio, asi que confirmo el resultado real.`;
+      case 'unban_player':
+        return `Voy, Xainner. Levanto el baneo en ${serverName}.`;
+      case 'teleport_player':
+        return `Voy, Xainner. Muevo al jugador en ${serverName}.`;
+      case 'give_item':
+        return `Voy, Xainner. Entrego el item en ${serverName}.`;
+      case 'set_godmode':
+        return `Voy, Xainner. Ajusto godmode en ${serverName}.`;
       default:
         return null;
     }

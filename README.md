@@ -145,6 +145,12 @@ Copy `.env.example` to `.env` and complete the required values. The service fail
 | `get_world_info` | `GET /api/panel-bridge/weather|time|world/stats` | Everyone in channel (no player data) |
 | `get_recent_errors` | `GET /api/server/console-log?filter=errors` (sanitized) | Owner only |
 | `get_player_position` | `GET /api/panel-bridge/server-info` (live x/y/z) | Owner only, never shared publicly |
+| `kick_player` | `POST /api/players/kick` | Owner only |
+| `ban_player` | `POST /api/players/ban` | Owner only (name ban; `ban_ip` only when asked) |
+| `unban_player` | `POST /api/players/unban` | Owner only |
+| `teleport_player` | `POST /api/players/teleport` (player or x/y/z) | Owner only |
+| `give_item` | `POST /api/players/add-item` (max 100) | Owner only |
+| `set_godmode` | `POST /api/players/godmode` | Owner only |
 | `get_mod_status` | `GET /api/mods/status`, `GET /api/mods/tracked`, `GET /api/scheduler/status` | Everyone if `ENABLE_MOD_TOOLS=true` |
 | `check_mod_updates` | `POST /api/mods/check-updates` | Everyone if `ENABLE_MOD_TOOLS=true` |
 | `save_world` | `POST /api/server/save` | Everyone if `PUBLIC_SAVE=true`, else privileged |

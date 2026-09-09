@@ -50,4 +50,32 @@ describe('admin-only tools', () => {
     const ex = executor();
     expect((await ex.execute('get_players', {}, CTX('user-2'))).ok).toBe(true);
   });
+
+  it('denies moderation to non-admin, even with role', async () => {
+    const ex = executor();
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['kick_player', { player_name: 'A' }],
+      ['ban_player', { player_name: 'A', ban_ip: false }],
+      ['unban_player', { player_name: 'A' }],
+      ['teleport_player', { player_name: 'A', target_player: 'B' }],
+      ['give_item', { player_name: 'A', item: 'Base.Axe', count: 1 }],
+      ['set_godmode', { player_name: 'A', enabled: true }],
+    ];
+    for (const [tool, args] of cases) {
+      const denied = await ex.execute(tool, args, CTX('user-2', ['role-9']));
+      expect(denied.denied).toBe(true);
+    }
+  });
+
+  it('runs moderation for admin', async () => {
+    const panel = {
+      assertArkno2Active: async () => {},
+      kickPlayer: async (player_name: string) => ({ ok: true, player: player_name }),
+      banPlayer: async (player_name: string) => ({ ok: true, player: player_name }),
+    } as unknown as PanelClient;
+    const config = { adminUserId: 'admin-1', pzServerName: 'ARKNO2', mutationAllowedRoleIds: [] } as unknown as AppConfig;
+    const ex = new ToolExecutor(panel, config);
+    expect((await ex.execute('kick_player', { player_name: 'Troll' }, CTX('admin-1'))).ok).toBe(true);
+    expect((await ex.execute('ban_player', { player_name: 'Troll' }, CTX('admin-1'))).ok).toBe(true);
+  });
 });

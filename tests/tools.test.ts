@@ -74,4 +74,25 @@ describe('tools', () => {
     expect(ADMIN_ONLY_TOOLS.has('get_players')).toBe(false);
     expect(ADMIN_ONLY_TOOLS.has('get_world_info')).toBe(false);
   });
+
+  it('validates moderation args', () => {
+    expect(() => validateToolArgs('kick_player', {})).toThrow(); // player_name required
+    expect(() => validateToolArgs('kick_player', { player_name: 'A' })).not.toThrow();
+    expect(() => validateToolArgs('kick_player', { player_name: 'A', reason: 'x'.repeat(257) })).toThrow();
+    expect(() => validateToolArgs('ban_player', { player_name: 'A', ban_ip: 'yes' } as unknown as Record<string, unknown>)).toThrow();
+    expect(() => validateToolArgs('ban_player', { player_name: 'A', ban_ip: true })).not.toThrow();
+    expect(() => validateToolArgs('teleport_player', { player_name: 'A', x: 'a' } as unknown as Record<string, unknown>)).toThrow();
+    expect(() => validateToolArgs('teleport_player', { player_name: 'A', target_player: 'B' })).not.toThrow();
+    expect(() => validateToolArgs('give_item', { player_name: 'A' } as unknown as Record<string, unknown>)).toThrow(); // item required
+    expect(() => validateToolArgs('give_item', { player_name: 'A', item: 'Base.Axe', count: 101 })).toThrow();
+    expect(() => validateToolArgs('set_godmode', { player_name: 'A' } as unknown as Record<string, unknown>)).toThrow(); // enabled required
+    expect(() => validateToolArgs('set_godmode', { player_name: 'A', enabled: 'yes' } as unknown as Record<string, unknown>)).toThrow();
+    expect(() => validateToolArgs('unban_player', { player_name: '' })).toThrow();
+  });
+
+  it('marks moderation admin-only', () => {
+    for (const n of ['kick_player', 'ban_player', 'unban_player', 'teleport_player', 'give_item', 'set_godmode']) {
+      expect(ADMIN_ONLY_TOOLS.has(n)).toBe(true);
+    }
+  });
 });
