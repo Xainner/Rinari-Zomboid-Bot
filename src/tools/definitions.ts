@@ -35,6 +35,57 @@ export function buildToolDefinitions(opts: ToolBuildOptions): ToolDefinition[] {
     {
       type: 'function',
       function: {
+        name: 'get_player_hours',
+        description: `Consulta horas jugadas en ${serverName} segun el registro del panel (no son horas de Steam). Sin player_name devuelve el ranking top 10; con player_name, la ficha de ese jugador.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+              description: 'Nombre del jugador. Omitelo para ver el ranking.',
+            },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_player_activity',
+        description: `Consulta actividad reciente de jugadores de ${serverName}: conexiones, desconexiones y muertes. Permite filtrar por jugador y por tipo.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+              description: 'Nombre del jugador. Omitelo para ver actividad general.',
+            },
+            action: {
+              type: 'string',
+              enum: ['connect', 'disconnect', 'death'],
+              description: 'Filtra por tipo de evento.',
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 20,
+              description: 'Maximo de eventos a devolver (default 10).',
+            },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'save_world',
         description: `Solicita al panel guardar el mundo de ${serverName}.`,
         parameters: { type: 'object', properties: {}, additionalProperties: false },
@@ -129,6 +180,8 @@ export function buildToolDefinitions(opts: ToolBuildOptions): ToolDefinition[] {
 export const ALLOWED_TOOL_NAMES = new Set([
   'get_server_status',
   'get_players',
+  'get_player_hours',
+  'get_player_activity',
   'get_mod_status',
   'check_mod_updates',
   'save_world',

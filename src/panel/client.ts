@@ -1,5 +1,5 @@
 import { PanelAuth } from './auth.js';
-import { ActiveServer, Arkno2Status, ModStatusResult, PanelError, PlayersResult, PolicyError } from './types.js';
+import { ActiveServer, Arkno2Status, ModStatusResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayersResult, PolicyError } from './types.js';
 import { sanitizeServerMessage } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
@@ -112,6 +112,106 @@ export class PanelClient {
       .map((p) => (typeof p === 'string' ? p : (p as Record<string, unknown>)?.['name']))
       .filter((n): n is string => typeof n === 'string');
     return { ok: true, server: this.opts.serverName, count: names.length, players: names };
+  }
+
+  /** Gameplay actions safe to expose. Moderation history stays out of the bot. */
+  static readonly gameplayActions: readonly string[] = ['connect', 'disconnect', 'death'];
+
+  private static toHoursEntry(raw: Record<string, unknown>): PlayerHoursEntry | null {
+    const name = raw['player_name'];
+    if (typeof name !== 'string' || name.trim().length === 0) return null;
+    let total = typeof raw['total_playtime_seconds'] === 'number' ? raw['total_playtime_seconds'] : 0;
+    const startRaw = raw['last_session_start'];
+    let online = false;
+    if (typeof startRaw === 'string' && startRaw.length > 0) {
+      const startMs = Date.parse(startRaw);
+      if (!Number.isNaN(startMs)) {
+        online = true;
+        // Stored total excludes the ongoing session: add the live delta.
+        total += Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      }
+    }
+    const sessions = typeof raw['session_count'] === 'number' ? raw['session_count'] : 0;
+    const firstSeen = typeof raw['first_seen'] === 'string' ? (raw['first_seen'] as string) : null;
+    const lastSeen = typeof raw['last_seen'] === 'string' ? (raw['last_seen'] as string) : null;
+    return {
+      player: name,
+      hours: Math.round((total / 3600) * 10) / 10,
+      sessions,
+      online,
+      firstSeen,
+      lastSeen,
+    };
+  }
+
+  private static assertPlayerName(name: unknown): string {
+    if (typeof name !== 'string' || name.trim().length === 0 || name.length > 64) {
+      throw new PolicyError('player_name must be a string of length 1..64');
+    }
+    // Mirror the panel's username guard: no control chars, quotes or backslash.
+    // eslint-disable-next-line no-control-regex
+    if (!/^[^\x00-\x1F\x7F"\\]{1,64}$/.test(name.trim())) {
+      throw new PolicyError('player_name has an invalid format');
+    }
+    return name.trim();
+  }
+
+  async getPlayerHours(playerName?: string): Promise<PlayerHoursResult> {
+    if (playerName !== undefined) {
+      const clean = PanelClient.assertPlayerName(playerName);
+      const data = await this.call<Record<string, unknown>>(
+        'GET',
+        `/api/players/stats/${encodeURIComponent(clean)}`,
+      );
+      const raw = (data?.['stat'] ?? data) as Record<string, unknown> | null;
+      if (!raw || typeof raw['player_name'] !== 'string') {
+        return { ok: true, server: this.opts.serverName, scope: 'player', found: false };
+      }
+      const entry = PanelClient.toHoursEntry(raw);
+      if (!entry) return { ok: true, server: this.opts.serverName, scope: 'player', found: false };
+      return { ok: true, server: this.opts.serverName, scope: 'player', found: true, entry };
+    }
+    const data = await this.call<Record<string, unknown>>('GET', '/api/players/stats');
+    const arr = Array.isArray(data?.['stats']) ? (data['stats'] as Record<string, unknown>[]) : [];
+    const entries = arr
+      .map((r) => PanelClient.toHoursEntry(r))
+      .filter((e): e is PlayerHoursEntry => e !== null)
+      .sort((a, b) => b.hours - a.hours);
+    return {
+      ok: true,
+      server: this.opts.serverName,
+      scope: 'ranking',
+      tracked: entries.length,
+      ranking: entries.slice(0, 10),
+    };
+  }
+
+  async getPlayerActivity(playerName?: string, action?: string, limit = 10): Promise<PlayerActivityResult> {
+    const clean = playerName === undefined ? undefined : PanelClient.assertPlayerName(playerName);
+    if (action !== undefined && !PanelClient.gameplayActions.includes(action)) {
+      throw new PolicyError(`action must be one of: ${PanelClient.gameplayActions.join(', ')}`);
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
+      throw new PolicyError('limit must be an integer in range 1..20');
+    }
+    // Over-fetch when filtering so the final slice still has enough events.
+    const fetchLimit = clean || action ? Math.min(Math.max(limit * 5, limit), 100) : limit;
+    const data = await this.call<Record<string, unknown>>('GET', `/api/players/activity?limit=${fetchLimit}`);
+    const logs = Array.isArray(data?.['logs']) ? (data['logs'] as Record<string, unknown>[]) : [];
+    const events: PlayerActivityEvent[] = [];
+    for (const log of logs) {
+      const act = log['action'];
+      if (typeof act !== 'string' || !PanelClient.gameplayActions.includes(act)) continue;
+      if (action !== undefined && act !== action) continue;
+      const pname = log['player_name'];
+      if (typeof pname !== 'string') continue;
+      if (clean !== undefined && pname.toLowerCase() !== clean.toLowerCase()) continue;
+      const details = typeof log['details'] === 'string' ? log['details'] : '';
+      const at = typeof log['logged_at'] === 'string' ? (log['logged_at'] as string) : '';
+      events.push({ player: pname, action: act, details: details.slice(0, 200), at });
+      if (events.length >= limit) break;
+    }
+    return { ok: true, server: this.opts.serverName, count: events.length, events };
   }
 
   async getModStatus(): Promise<ModStatusResult> {

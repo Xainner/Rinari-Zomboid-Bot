@@ -21,6 +21,41 @@ export interface PlayersResult {
   players: string[];
 }
 
+export interface PlayerHoursEntry {
+  player: string;
+  /** Hours played, rounded to 1 decimal. Includes the live ongoing session. */
+  hours: number;
+  sessions: number;
+  online: boolean;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+export interface PlayerHoursResult {
+  ok: boolean;
+  server: string;
+  scope: 'ranking' | 'player';
+  /** Total players tracked (ranking scope only). */
+  tracked?: number;
+  ranking?: PlayerHoursEntry[];
+  entry?: PlayerHoursEntry;
+  found?: boolean;
+}
+
+export interface PlayerActivityEvent {
+  player: string;
+  action: string;
+  details: string;
+  at: string;
+}
+
+export interface PlayerActivityResult {
+  ok: boolean;
+  server: string;
+  count: number;
+  events: PlayerActivityEvent[];
+}
+
 export interface ModStatusResult {
   ok: boolean;
   server: string;

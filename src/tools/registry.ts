@@ -3,6 +3,8 @@ import { ALLOWED_TOOL_NAMES } from './definitions.js';
 export type ToolName =
   | 'get_server_status'
   | 'get_players'
+  | 'get_player_hours'
+  | 'get_player_activity'
   | 'get_mod_status'
   | 'check_mod_updates'
   | 'save_world'
@@ -44,6 +46,8 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
   const allowedByTool: Record<ToolName, string[]> = {
     get_server_status: [],
     get_players: [],
+    get_player_hours: ['player_name'],
+    get_player_activity: ['player_name', 'action', 'limit'],
     get_mod_status: [],
     check_mod_updates: [],
     save_world: [],
@@ -75,6 +79,22 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
     const m = args['message'];
     if (typeof m !== 'string' || m.length < 1 || m.length > 300) {
       throw new Error('message must be a string of length 1..300');
+    }
+  }
+  if (name === 'get_player_hours' || name === 'get_player_activity') {
+    const p = args['player_name'];
+    if (p !== undefined && (typeof p !== 'string' || p.trim().length < 1 || p.length > 64)) {
+      throw new Error('player_name must be a string of length 1..64');
+    }
+  }
+  if (name === 'get_player_activity') {
+    const a = args['action'];
+    if (a !== undefined && (typeof a !== 'string' || !['connect', 'disconnect', 'death'].includes(a))) {
+      throw new Error('action must be one of: connect, disconnect, death');
+    }
+    const l = args['limit'];
+    if (l !== undefined && (!Number.isInteger(l) || (l as number) < 1 || (l as number) > 20)) {
+      throw new Error('limit must be an integer in range 1..20');
     }
   }
 }

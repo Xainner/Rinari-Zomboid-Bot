@@ -45,7 +45,7 @@ export class ToolExecutor {
         if ((tool === 'get_mod_status' || tool === 'check_mod_updates') && !this.config.enableModTools) {
           return { ok: false, denied: true, error: 'Mod tools are disabled' };
         }
-        const data = await this.runRead(tool as ToolName);
+        const data = await this.runRead(tool as ToolName, args);
         logger.info('tool_execution', {
           tool,
           requesterId: ctx.authorId,
@@ -156,15 +156,30 @@ export class ToolExecutor {
   }
 
   private isReadOnly(tool: ToolName): boolean {
-    return tool === 'get_server_status' || tool === 'get_players' || tool === 'get_mod_status' || tool === 'check_mod_updates';
+    return (
+      tool === 'get_server_status' ||
+      tool === 'get_players' ||
+      tool === 'get_player_hours' ||
+      tool === 'get_player_activity' ||
+      tool === 'get_mod_status' ||
+      tool === 'check_mod_updates'
+    );
   }
 
-  private async runRead(tool: ToolName): Promise<unknown> {
+  private async runRead(tool: ToolName, args: Record<string, unknown>): Promise<unknown> {
     switch (tool) {
       case 'get_server_status':
         return this.panel.getArkno2Status();
       case 'get_players':
         return this.panel.getPlayers();
+      case 'get_player_hours':
+        return this.panel.getPlayerHours(args['player_name'] as string | undefined);
+      case 'get_player_activity':
+        return this.panel.getPlayerActivity(
+          args['player_name'] as string | undefined,
+          args['action'] as string | undefined,
+          typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,
+        );
       case 'get_mod_status':
         return this.panel.getModStatus();
       case 'check_mod_updates':

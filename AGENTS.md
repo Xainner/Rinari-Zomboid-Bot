@@ -847,6 +847,73 @@ No retornar información privada no necesaria.
 
 ---
 
+## `get_player_hours`
+
+Tool de lectura, disponible para todos los usuarios del canal (mismo nivel que `get_players`).
+
+### Schema
+
+```json
+{
+  "name": "get_player_hours",
+  "description": "Consulta horas jugadas en ARKNO2 segun el registro del panel (no son horas de Steam). Sin player_name devuelve el ranking top 10; con player_name, la ficha de ese jugador.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "player_name": { "type": "string", "minLength": 1, "maxLength": 64 }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}
+```
+
+Backend:
+
+```http
+GET /api/players/stats
+GET /api/players/stats/:playerName
+```
+
+El backend ordena por horas descendente, limita a top 10, redondea a 1 decimal y suma la sesión en curso (`last_session_start`) al total. Si el jugador no existe, retorna `found: false` en vez de inventar datos.
+
+Aclarar al usuario que son horas trackeadas por el panel desde que empezó el registro, no horas lifetime de Steam.
+
+---
+
+## `get_player_activity`
+
+Tool de lectura, disponible para todos los usuarios del canal. Expone solo acciones de gameplay (`connect`, `disconnect`, `death`); el historial de moderación (kick, ban, etc.) queda fuera a propósito.
+
+### Schema
+
+```json
+{
+  "name": "get_player_activity",
+  "description": "Consulta actividad reciente de jugadores de ARKNO2: conexiones, desconexiones y muertes. Permite filtrar por jugador y por tipo.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "player_name": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "action": { "type": "string", "enum": ["connect", "disconnect", "death"] },
+      "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}
+```
+
+Backend:
+
+```http
+GET /api/players/activity?limit=N
+```
+
+Con filtro de jugador se compara case-insensitive en el bot (el panel filtra exacto). Los detalles de muerte tienen forma `non-pvp death at (x,y,z)` o `PvP ...`: reportarlos tal cual, sin inventar causa o asesino.
+
+---
+
 ## `get_mod_status`
 
 Disponible solo con:
