@@ -105,4 +105,40 @@ describe('orchestrator resilience', () => {
     expect(reply).toBe('Hay 2 jugadores.');
     expect(execute).toHaveBeenCalledWith('get_players', {}, expect.objectContaining({ authorId: '111' }));
   });
+
+  it('blocks hallucinated <tool_call> text and retries instead of leaking it', async () => {
+    const leak = '<tool_call>\n<function=list_mod_updates>\n</function>\n</call>';
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(completion({ role: 'assistant', content: leak }))
+      .mockResolvedValueOnce(completion({ role: 'assistant', content: 'Todo al día, sin updates.' }));
+    const execute = vi.fn();
+    const store = createConversationStore();
+    const orch = new Orchestrator(
+      mockLlm(create),
+      cfg(),
+      { execute } as unknown as import('../src/tools/executor.js').ToolExecutor,
+      store,
+    );
+    const reply = await orch.handle(MSG);
+    expect(reply).toBe('Todo al día, sin updates.');
+    expect(execute).not.toHaveBeenCalled();
+    const recent = await store.recent(MSG.channelId);
+    expect(recent.some((m) => m.content.includes('tool_call'))).toBe(false);
+  });
+
+  it('falls back honestly when the model only emits pseudo tool calls', async () => {
+    const leak = '<tool_call>\n<function=get_console_logs>\n</function>\n</call>';
+    const create = vi.fn().mockResolvedValue(completion({ role: 'assistant', content: leak }));
+    const orch = new Orchestrator(
+      mockLlm(create),
+      cfg(),
+      { execute: vi.fn() } as unknown as import('../src/tools/executor.js').ToolExecutor,
+      createConversationStore(),
+    );
+    const reply = await orch.handle(MSG);
+    expect(reply).not.toContain('tool_call');
+    expect(reply).not.toContain('get_console_logs');
+    expect(reply.length).toBeGreaterThan(10);
+  });
 });
