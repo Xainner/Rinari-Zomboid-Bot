@@ -1,5 +1,5 @@
 import { logger } from '../util/logger.js';
-import { sanitizeForLog } from '../security/sanitize.js';
+import { PanelError } from './types.js';
 
 export interface PanelAuthOptions {
   baseUrl: string;
@@ -91,8 +91,11 @@ export class PanelAuth {
     try {
       return await fn(this.accessToken as string);
     } catch (err) {
-      const msg = sanitizeForLog(String(err));
-      if (msg.includes('401')) {
+      // NOTE: match on status, not on message text. PanelError('Unauthorized')
+      // stringifies without the numeric code, so string-matching '401' never
+      // fired and expired tokens were never refreshed (every call failed with
+      // Unauthorized until process restart).
+      if (err instanceof PanelError && err.status === 401) {
         await this.refreshSingleFlight();
         return fn(this.accessToken as string);
       }
