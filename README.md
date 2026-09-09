@@ -138,6 +138,13 @@ Copy `.env.example` to `.env` and complete the required values. The service fail
 | `get_players` | `GET /api/players` | Everyone in channel |
 | `get_player_hours` | `GET /api/players/stats`, `GET /api/players/stats/:player` | Everyone in channel (panel-tracked playtime, not Steam hours) |
 | `get_player_activity` | `GET /api/players/activity` | Everyone in channel (connects, disconnects, deaths only) |
+| `get_death_ranking` | `GET /api/players/activity` (aggregated) | Everyone in channel |
+| `get_mod_updates_detail` | `GET /api/mods/tracked` (names of updatable mods) | Everyone in channel |
+| `get_next_maintenance` | `GET /api/scheduler/status` | Everyone in channel |
+| `get_backups` | `GET /api/backup/status`, `GET /api/backup/list` (paths stripped) | Everyone in channel |
+| `get_world_info` | `GET /api/panel-bridge/weather|time|world/stats` | Everyone in channel (no player data) |
+| `get_recent_errors` | `GET /api/server/console-log?filter=errors` (sanitized) | Owner only |
+| `get_player_position` | `GET /api/panel-bridge/server-info` (live x/y/z) | Owner only, never shared publicly |
 | `get_mod_status` | `GET /api/mods/status`, `GET /api/mods/tracked`, `GET /api/scheduler/status` | Everyone if `ENABLE_MOD_TOOLS=true` |
 | `check_mod_updates` | `POST /api/mods/check-updates` | Everyone if `ENABLE_MOD_TOOLS=true` |
 | `save_world` | `POST /api/server/save` | Everyone if `PUBLIC_SAVE=true`, else privileged |

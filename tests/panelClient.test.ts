@@ -166,4 +166,130 @@ describe('panel client', () => {
     const r = await c.getPlayerActivity(undefined, undefined, 20);
     expect(r.count).toBe(20);
   });
+
+  it('aggregates death ranking desc', async () => {
+    const logs = [
+      { player_name: 'A', action: 'death', details: 'x', logged_at: 't' },
+      { player_name: 'B', action: 'death', details: 'x', logged_at: 't' },
+      { player_name: 'A', action: 'death', details: 'x', logged_at: 't' },
+      { player_name: 'A', action: 'connect', details: 'x', logged_at: 't' },
+    ];
+    const c = clientWithFetch((url) => {
+      if (url.includes('/api/players/activity')) return json({ success: true, logs });
+      return json({});
+    });
+    const r = await c.getDeathRanking(5);
+    expect(r.windowDeaths).toBe(3);
+    expect(r.ranking).toEqual([
+      { player: 'A', deaths: 2 },
+      { player: 'B', deaths: 1 },
+    ]);
+  });
+
+  it('lists only mods with updates available', async () => {
+    const mods = [
+      { workshop_id: '1', name: 'Old', update_available: 0 },
+      { workshop_id: '2', name: 'New', update_available: 1 },
+    ];
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/mods/tracked')) return json({ mods });
+      return json({});
+    });
+    const r = await c.getModUpdatesDetail();
+    expect(r.count).toBe(1);
+    expect(r.updates).toEqual([{ workshop_id: '2', name: 'New' }]);
+  });
+
+  it('maps next maintenance and flags', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/scheduler/status')) {
+        return json({ nextRun: { label: 'backup', at: '2026-09-09T04:00:00.000Z' }, autoRestartEnabled: false, backupScheduleEnabled: true });
+      }
+      return json({});
+    });
+    const r = await c.getNextMaintenance();
+    expect(r.next).toEqual({ label: 'backup', at: '2026-09-09T04:00:00.000Z' });
+    expect(r.backupScheduled).toBe(true);
+  });
+
+  it('strips backup paths', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/backup/status')) {
+        return json({
+          enabled: true,
+          schedule: '0 * * * *',
+          backupCount: 11,
+          backupInProgress: false,
+          lastBackup: { name: 'B.zip', path: '/zomboid/backups/B.zip', size: 10, created: 't', savesPath: '/zomboid/Saves' },
+        });
+      }
+      if (url.endsWith('/api/backup/list')) {
+        return json({ backups: [{ name: 'B.zip', path: '/zomboid/backups/B.zip', size: 10, created: 't' }] });
+      }
+      return json({});
+    });
+    const r = await c.getBackups();
+    expect(r.lastBackup).toEqual({ name: 'B.zip', size: 10, created: 't' });
+    expect(JSON.stringify(r)).not.toContain('/zomboid/');
+  });
+
+  it('reports world unavailable when bridge is down', async () => {
+    const c = clientWithFetch(() => json({ error: 'Bridge not running' }, 400));
+    const r = await c.getWorldInfo();
+    expect(r.available).toBe(false);
+  });
+
+  it('maps world time, weather and zombies', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/panel-bridge/weather')) {
+        return json({ success: true, data: { temperature: 14, isRaining: true, isSnowing: false, isThunderStorming: false, fogIntensity: 0, cloudIntensity: 0.1 } });
+      }
+      if (url.endsWith('/api/panel-bridge/time')) {
+        return json({ success: true, data: { year: 1993, month: 11, day: 0, hour: 12.9, minute: 58, nightsSurvived: 115 } });
+      }
+      if (url.endsWith('/api/panel-bridge/world/stats')) {
+        return json({ success: true, data: { serverName: 'ARKNO2', map: 'Muldraugh, KY', zombiesInCell: 2171 } });
+      }
+      return json({});
+    });
+    const r = await c.getWorldInfo();
+    expect(r.available).toBe(true);
+    expect(r.time).toMatchObject({ year: 1993, hour: 12, nightsSurvived: 115 });
+    expect(r.weather).toMatchObject({ temperature: 14, raining: true });
+    expect(r.zombies).toBe(2171);
+    expect(r.map).toBe('Muldraugh, KY');
+  });
+
+  it('sanitizes console error lines', async () => {
+    const c = clientWithFetch((url) => {
+      if (url.includes('/api/server/console-log')) {
+        return json({ success: true, lines: ['Steam client 76561198346294368 is initiating a connection from 1.2.3.4:5678'] });
+      }
+      return json({});
+    });
+    const r = await c.getRecentErrors();
+    expect(r.count).toBe(1);
+    expect(r.lines[0]).not.toContain('76561198346294368');
+    expect(r.lines[0]).not.toContain('1.2.3.4');
+  });
+
+  it('maps player positions and single lookup', async () => {
+    const players = [
+      { name: 'Wachita', x: 13913.7, y: 5809.2, z: 2, health: 100 },
+      { name: 'kevinAK7', x: 8149, y: 11725, z: 0, health: 80.58 },
+    ];
+    const c = clientWithFetch((url) => {
+      if (url.endsWith('/api/panel-bridge/server-info')) return json({ success: true, data: { players } });
+      return json({});
+    });
+    const all = await c.getPlayerPosition();
+    expect(all.available).toBe(true);
+    expect(all.count).toBe(2);
+    expect(all.positions![0]).toMatchObject({ player: 'Wachita', x: 13913, y: 5809 });
+    const one = await c.getPlayerPosition('kevinaK7');
+    expect(one.found).toBe(true);
+    expect(one.entry).toMatchObject({ player: 'kevinAK7', health: 80.6 });
+    const missing = await c.getPlayerPosition('Nadie');
+    expect(missing.found).toBe(false);
+  });
 });

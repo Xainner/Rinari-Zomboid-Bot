@@ -5,6 +5,13 @@ export type ToolName =
   | 'get_players'
   | 'get_player_hours'
   | 'get_player_activity'
+  | 'get_death_ranking'
+  | 'get_mod_updates_detail'
+  | 'get_next_maintenance'
+  | 'get_backups'
+  | 'get_world_info'
+  | 'get_recent_errors'
+  | 'get_player_position'
   | 'get_mod_status'
   | 'check_mod_updates'
   | 'save_world'
@@ -48,6 +55,13 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
     get_players: [],
     get_player_hours: ['player_name'],
     get_player_activity: ['player_name', 'action', 'limit'],
+    get_death_ranking: ['limit'],
+    get_mod_updates_detail: [],
+    get_next_maintenance: [],
+    get_backups: ['limit'],
+    get_world_info: [],
+    get_recent_errors: ['limit'],
+    get_player_position: ['player_name'],
     get_mod_status: [],
     check_mod_updates: [],
     save_world: [],
@@ -97,4 +111,28 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
       throw new Error('limit must be an integer in range 1..20');
     }
   }
+  if (name === 'get_death_ranking' || name === 'get_backups') {
+    const l = args['limit'];
+    if (l !== undefined && (!Number.isInteger(l) || (l as number) < 1 || (l as number) > 10)) {
+      throw new Error('limit must be an integer in range 1..10');
+    }
+  }
+  if (name === 'get_recent_errors') {
+    const l = args['limit'];
+    if (l !== undefined && (!Number.isInteger(l) || (l as number) < 1 || (l as number) > 20)) {
+      throw new Error('limit must be an integer in range 1..20');
+    }
+  }
+  if (name === 'get_player_position') {
+    const p = args['player_name'];
+    if (p !== undefined && (typeof p !== 'string' || p.trim().length < 1 || p.length > 64)) {
+      throw new Error('player_name must be a string of length 1..64');
+    }
+  }
 }
+
+/**
+ * Read tools restricted to the admin user only (no role bypass).
+ * Everything else read-only is public to the channel.
+ */
+export const ADMIN_ONLY_TOOLS: ReadonlySet<string> = new Set(['get_recent_errors', 'get_player_position']);

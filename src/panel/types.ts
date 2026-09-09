@@ -56,6 +56,92 @@ export interface PlayerActivityResult {
   events: PlayerActivityEvent[];
 }
 
+export interface DeathRankingEntry {
+  player: string;
+  deaths: number;
+}
+
+export interface DeathRankingResult {
+  ok: boolean;
+  server: string;
+  /** Death events seen in the scan window. */
+  windowDeaths: number;
+  ranking: DeathRankingEntry[];
+}
+
+export interface ModUpdateEntry {
+  workshop_id: string;
+  name: string;
+}
+
+export interface ModUpdatesDetailResult {
+  ok: boolean;
+  server: string;
+  count: number;
+  updates: ModUpdateEntry[];
+}
+
+export interface NextMaintenanceResult {
+  ok: boolean;
+  server: string;
+  next: { label: string; at: string } | null;
+  autoRestart: boolean;
+  backupScheduled: boolean;
+}
+
+export interface BackupSummary {
+  name: string;
+  size: number;
+  created: string;
+}
+
+export interface BackupsResult {
+  ok: boolean;
+  server: string;
+  enabled: boolean;
+  schedule: string | null;
+  backupCount: number;
+  backupInProgress: boolean;
+  lastBackup: BackupSummary | null;
+  recent: BackupSummary[];
+}
+
+export interface WorldInfoResult {
+  ok: boolean;
+  server: string;
+  available: boolean;
+  time?: { year: number; month: number; day: number; hour: number; minute: number; nightsSurvived: number };
+  weather?: { temperature: number; raining: boolean; snowing: boolean; storm: boolean; fog: number; clouds: number };
+  zombies?: number;
+  map?: string;
+}
+
+export interface RecentErrorsResult {
+  ok: boolean;
+  server: string;
+  count: number;
+  lines: string[];
+}
+
+export interface PlayerPosition {
+  player: string;
+  x: number;
+  y: number;
+  z: number;
+  health: number;
+}
+
+export interface PlayerPositionResult {
+  ok: boolean;
+  server: string;
+  available: boolean;
+  scope?: 'all' | 'player';
+  count?: number;
+  positions?: PlayerPosition[];
+  entry?: PlayerPosition;
+  found?: boolean;
+}
+
 export interface ModStatusResult {
   ok: boolean;
   server: string;

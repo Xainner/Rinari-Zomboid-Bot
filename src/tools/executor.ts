@@ -1,7 +1,7 @@
 import { PanelClient } from '../panel/client.js';
 import { AppConfig } from '../config.js';
 import { decideMutation, hasMutationRole, isAdmin, MutationTool } from '../security/policy.js';
-import { assertKnownTool, isLifecycleTool, releaseLifecycleLock, tryAcquireLifecycleLock, validateToolArgs, ToolName } from './registry.js';
+import { assertKnownTool, isLifecycleTool, releaseLifecycleLock, tryAcquireLifecycleLock, validateToolArgs, ADMIN_ONLY_TOOLS, ToolName } from './registry.js';
 import { sanitizeForLog } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
@@ -41,6 +41,21 @@ export class ToolExecutor {
 
       const privileged = isAdmin(ctx.authorId, this.config.adminUserId);
       const hasRole = hasMutationRole(ctx.memberRoleIds, this.config.mutationAllowedRoleIds);
+
+      // Admin-only tools: no role bypass, no exceptions. The LLM is told
+      // these fail for anyone else, so it should not offer them publicly.
+      if (ADMIN_ONLY_TOOLS.has(tool) && !privileged) {
+        logger.info('tool_execution', {
+          tool,
+          requesterId: ctx.authorId,
+          server: this.config.pzServerName,
+          authorized: false,
+          durationMs: Date.now() - started,
+          ok: false,
+          error: 'admin only',
+        });
+        return { ok: false, denied: true, error: 'Solo Xainner puede usar esa herramienta.' };
+      }
 
       if (this.isReadOnly(tool as ToolName)) {
         if ((tool === 'get_mod_status' || tool === 'check_mod_updates') && !this.config.enableModTools) {
@@ -165,6 +180,13 @@ export class ToolExecutor {
       tool === 'get_players' ||
       tool === 'get_player_hours' ||
       tool === 'get_player_activity' ||
+      tool === 'get_death_ranking' ||
+      tool === 'get_mod_updates_detail' ||
+      tool === 'get_next_maintenance' ||
+      tool === 'get_backups' ||
+      tool === 'get_world_info' ||
+      tool === 'get_recent_errors' ||
+      tool === 'get_player_position' ||
       tool === 'get_mod_status' ||
       tool === 'check_mod_updates'
     );
@@ -184,6 +206,26 @@ export class ToolExecutor {
           args['action'] as string | undefined,
           typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,
         );
+      case 'get_death_ranking':
+        return this.panel.getDeathRanking(
+          typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,
+        );
+      case 'get_mod_updates_detail':
+        return this.panel.getModUpdatesDetail();
+      case 'get_next_maintenance':
+        return this.panel.getNextMaintenance();
+      case 'get_backups':
+        return this.panel.getBackups(
+          typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,
+        );
+      case 'get_world_info':
+        return this.panel.getWorldInfo();
+      case 'get_recent_errors':
+        return this.panel.getRecentErrors(
+          typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,
+        );
+      case 'get_player_position':
+        return this.panel.getPlayerPosition(args['player_name'] as string | undefined);
       case 'get_mod_status':
         return this.panel.getModStatus();
       case 'check_mod_updates':
