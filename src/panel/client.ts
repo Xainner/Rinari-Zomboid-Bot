@@ -1,6 +1,6 @@
 import { PanelAuth } from './auth.js';
-import { ActiveServer, Arkno2Status, ModStatusResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayersResult, PolicyError } from './types.js';
-import { sanitizeServerMessage } from '../security/sanitize.js';
+import { ActiveServer, Arkno2Status, BackupsResult, BackupSummary, DeathRankingResult, ModStatusResult, ModUpdatesDetailResult, NextMaintenanceResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayerPosition, PlayerPositionResult, PlayersResult, PolicyError, RecentErrorsResult, WorldInfoResult } from './types.js';
+import { sanitizeConsoleLine, sanitizeServerMessage } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
 export interface PanelClientOptions {
@@ -212,6 +212,188 @@ export class PanelClient {
       if (events.length >= limit) break;
     }
     return { ok: true, server: this.opts.serverName, count: events.length, events };
+  }
+
+  async getDeathRanking(limit = 5): Promise<DeathRankingResult> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+      throw new PolicyError('limit must be an integer in range 1..10');
+    }
+    const data = await this.call<Record<string, unknown>>('GET', '/api/players/activity?limit=100');
+    const logs = Array.isArray(data?.['logs']) ? (data['logs'] as Record<string, unknown>[]) : [];
+    const counts = new Map<string, number>();
+    let windowDeaths = 0;
+    for (const log of logs) {
+      if (log['action'] !== 'death' || typeof log['player_name'] !== 'string') continue;
+      windowDeaths++;
+      counts.set(log['player_name'] as string, (counts.get(log['player_name'] as string) ?? 0) + 1);
+    }
+    const ranking = [...counts.entries()]
+      .map(([player, deaths]) => ({ player, deaths }))
+      .sort((a, b) => b.deaths - a.deaths)
+      .slice(0, limit);
+    return { ok: true, server: this.opts.serverName, windowDeaths, ranking };
+  }
+
+  async getModUpdatesDetail(): Promise<ModUpdatesDetailResult> {
+    const data = await this.call<Record<string, unknown>>('GET', '/api/mods/tracked');
+    const raw = data?.['mods'];
+    const list = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
+    const updates = list
+      .filter((m) => m['update_available'] === 1 || m['update_available'] === true)
+      .map((m) => ({
+        workshop_id: String(m['workshop_id'] ?? ''),
+        name: typeof m['name'] === 'string' && m['name'].length > 0 ? (m['name'] as string) : String(m['workshop_id'] ?? ''),
+      }))
+      .filter((m) => m.workshop_id.length > 0)
+      .slice(0, 50);
+    return { ok: true, server: this.opts.serverName, count: updates.length, updates };
+  }
+
+  async getNextMaintenance(): Promise<NextMaintenanceResult> {
+    const s = await this.call<Record<string, unknown>>('GET', '/api/scheduler/status');
+    const rawNext = s?.['nextRun'] as Record<string, unknown> | null | undefined;
+    const next =
+      rawNext && typeof rawNext['label'] === 'string' && typeof rawNext['at'] === 'string'
+        ? { label: rawNext['label'] as string, at: rawNext['at'] as string }
+        : null;
+    return {
+      ok: true,
+      server: this.opts.serverName,
+      next,
+      autoRestart: s?.['autoRestartEnabled'] === true,
+      backupScheduled: s?.['backupScheduleEnabled'] === true,
+    };
+  }
+
+  private static toBackupSummary(raw: Record<string, unknown>): BackupSummary | null {
+    if (typeof raw['name'] !== 'string') return null;
+    return {
+      name: raw['name'] as string,
+      size: typeof raw['size'] === 'number' ? (raw['size'] as number) : 0,
+      created: typeof raw['created'] === 'string' ? (raw['created'] as string) : '',
+    };
+  }
+
+  async getBackups(limit = 5): Promise<BackupsResult> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+      throw new PolicyError('limit must be an integer in range 1..10');
+    }
+    const status = await this.call<Record<string, unknown>>('GET', '/api/backup/status');
+    const listRaw = await this.call<Record<string, unknown>>('GET', '/api/backup/list');
+    const arr = Array.isArray(listRaw?.['backups']) ? (listRaw['backups'] as Record<string, unknown>[]) : [];
+    const recent = arr
+      .map((b) => PanelClient.toBackupSummary(b))
+      .filter((b): b is BackupSummary => b !== null)
+      .slice(0, limit);
+    const lastRaw = status?.['lastBackup'] as Record<string, unknown> | null | undefined;
+    // NOTE: paths (path, savesPath) are deliberately stripped: names+sizes suffice.
+    return {
+      ok: true,
+      server: this.opts.serverName,
+      enabled: status?.['enabled'] === true,
+      schedule: typeof status?.['schedule'] === 'string' ? (status['schedule'] as string) : null,
+      backupCount: typeof status?.['backupCount'] === 'number' ? (status['backupCount'] as number) : recent.length,
+      backupInProgress: status?.['backupInProgress'] === true,
+      lastBackup: lastRaw ? PanelClient.toBackupSummary(lastRaw) : null,
+      recent,
+    };
+  }
+
+  async getWorldInfo(): Promise<WorldInfoResult> {
+    const get = (path: string): Promise<Record<string, unknown> | null> =>
+      this.call<Record<string, unknown>>('GET', path)
+        .then((r) => ((r?.['data'] as Record<string, unknown>) ?? r ?? null) as Record<string, unknown> | null)
+        .catch(() => null);
+    const [weather, time, world] = await Promise.all([
+      get('/api/panel-bridge/weather'),
+      get('/api/panel-bridge/time'),
+      get('/api/panel-bridge/world/stats'),
+    ]);
+    if (!weather && !time && !world) {
+      return { ok: true, server: this.opts.serverName, available: false };
+    }
+    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const out: WorldInfoResult = { ok: true, server: this.opts.serverName, available: true };
+    if (time) {
+      out.time = {
+        year: num(time['year']) ?? 0,
+        month: num(time['month']) ?? 0,
+        day: num(time['day']) ?? 0,
+        hour: Math.floor(num(time['hour']) ?? 0),
+        minute: num(time['minute']) ?? 0,
+        nightsSurvived: num(time['nightsSurvived']) ?? 0,
+      };
+    }
+    if (weather) {
+      out.weather = {
+        temperature: num(weather['temperature']) ?? 0,
+        raining: weather['isRaining'] === true,
+        snowing: weather['isSnowing'] === true,
+        storm: weather['isThunderStorming'] === true,
+        fog: num(weather['fogIntensity']) ?? 0,
+        clouds: num(weather['cloudIntensity']) ?? 0,
+      };
+    }
+    if (world) {
+      const z = num(world['zombiesInCell']);
+      if (z !== null) out.zombies = Math.floor(z);
+      if (typeof world['map'] === 'string') out.map = world['map'] as string;
+    }
+    return out;
+  }
+
+  async getRecentErrors(limit = 10): Promise<RecentErrorsResult> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
+      throw new PolicyError('limit must be an integer in range 1..20');
+    }
+    const data = await this.call<Record<string, unknown>>(
+      'GET',
+      `/api/server/console-log?filter=errors&lines=${limit}`,
+    );
+    const raw = Array.isArray(data?.['lines']) ? (data['lines'] as unknown[]) : [];
+    const lines = raw
+      .filter((l): l is string => typeof l === 'string')
+      .map((l) => sanitizeConsoleLine(l))
+      .filter((l) => l.length > 0)
+      .slice(0, limit);
+    return { ok: true, server: this.opts.serverName, count: lines.length, lines };
+  }
+
+  private static toPosition(raw: Record<string, unknown>): PlayerPosition | null {
+    const name = raw['name'] ?? raw['username'] ?? raw['player_name'];
+    const x = raw['x'];
+    const y = raw['y'];
+    if (typeof name !== 'string' || typeof x !== 'number' || typeof y !== 'number') return null;
+    return {
+      player: name,
+      x: Math.floor(x),
+      y: Math.floor(y),
+      z: typeof raw['z'] === 'number' ? Math.floor(raw['z'] as number) : 0,
+      health: typeof raw['health'] === 'number' ? Math.round((raw['health'] as number) * 10) / 10 : 100,
+    };
+  }
+
+  async getPlayerPosition(playerName?: string): Promise<PlayerPositionResult> {
+    const clean = playerName === undefined ? undefined : PanelClient.assertPlayerName(playerName);
+    let data: Record<string, unknown> | null;
+    try {
+      // server-info works; the per-player bridge command is currently broken
+      // server-side (Lua pcall error), so always fetch all and filter here.
+      data = await this.call<Record<string, unknown>>('GET', '/api/panel-bridge/server-info');
+    } catch {
+      return { ok: true, server: this.opts.serverName, available: false };
+    }
+    const inner = (data?.['data'] as Record<string, unknown>) ?? data;
+    const arr = Array.isArray(inner?.['players']) ? (inner['players'] as Record<string, unknown>[]) : [];
+    const positions = arr
+      .map((p) => PanelClient.toPosition(p))
+      .filter((p): p is PlayerPosition => p !== null);
+    if (clean !== undefined) {
+      const entry = positions.find((p) => p.player.toLowerCase() === clean.toLowerCase());
+      if (!entry) return { ok: true, server: this.opts.serverName, available: true, scope: 'player', found: false };
+      return { ok: true, server: this.opts.serverName, available: true, scope: 'player', found: true, entry };
+    }
+    return { ok: true, server: this.opts.serverName, available: true, scope: 'all', count: positions.length, positions };
   }
 
   async getModStatus(): Promise<ModStatusResult> {

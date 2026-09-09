@@ -51,6 +51,20 @@ export function sanitizeServerMessage(text: string): string {
   return clean.slice(0, 300);
 }
 
+/**
+ * Redacts PII from game console lines before they reach the LLM/Discord:
+ * SteamIDs, IPv4 addresses (with optional port). Also collapses whitespace
+ * and caps length. Paths are left intact: they help diagnose mod errors and
+ * live under an admin-only tool.
+ */
+export function sanitizeConsoleLine(line: string): string {
+  let out = redactKnownSecrets(line);
+  out = out.replace(/\b7656\d{13}\b/g, '[steamid]');
+  out = out.replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, '[ip]');
+  out = out.replace(/\s+/g, ' ').trim();
+  return out.slice(0, 300);
+}
+
 export function secretKeysForDocs(): string[] {
   return [...SECRET_KEYS];
 }

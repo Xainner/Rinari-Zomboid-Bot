@@ -914,6 +914,23 @@ Con filtro de jugador se compara case-insensitive en el bot (el panel filtra exa
 
 ---
 
+## Lecturas de mundo y servidor (Tier 1, públicas)
+
+- `get_death_ranking` (`{limit? 1..10}`): agrega muertes de las últimas 100 actividades. Backend `GET /api/players/activity?limit=100`.
+- `get_mod_updates_detail` (sin args): nombres + workshop_id con `update_available` desde `GET /api/mods/tracked`. Vacío = todo al día.
+- `get_next_maintenance` (sin args): `nextRun {label, at}` + flags desde `GET /api/scheduler/status`.
+- `get_backups` (`{limit? 1..10}`): `GET /api/backup/status` + `GET /api/backup/list`. **Paths siempre strippeados** (name/size/created únicamente).
+- `get_world_info` (sin args): hora, clima, zombies y mapa vía `GET /api/panel-bridge/weather|time|world/stats` en paralelo, cada uno con catch individual. Si el bridge está caído retorna `available: false`, no error. Nunca incluye datos de jugadores.
+
+## Lecturas solo-admin (sin bypass por rol)
+
+Gating en `ADMIN_ONLY_TOOLS` del registry + chequeo en el executor antes de cualquier ejecución. El system prompt las declara admin-only para que el modelo no las ofrezca a otros.
+
+- `get_recent_errors` (`{limit? 1..20}`): `GET /api/server/console-log?filter=errors&lines=N`. Cada línea pasa por `sanitizeConsoleLine` (redacta SteamIDs e IPs, colapsa espacios, cap 300 chars).
+- `get_player_position` (`{player_name?}`): `GET /api/panel-bridge/server-info` (el comando per-jugador del bridge está roto server-side con Lua pcall error, así que siempre se trae todo y se filtra en el bot, case-insensitive). Retorna x/y/z/health. **Prohibido revelar coordenadas ajenas a no-admins**, también por prompt.
+
+---
+
 ## `get_mod_status`
 
 Disponible solo con:

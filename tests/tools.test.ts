@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertKnownTool, validateToolArgs } from '../src/tools/registry.js';
+import { assertKnownTool, validateToolArgs, ADMIN_ONLY_TOOLS } from '../src/tools/registry.js';
 import { buildToolDefinitions } from '../src/tools/definitions.js';
 
 describe('tools', () => {
@@ -48,5 +48,30 @@ describe('tools', () => {
     expect(() => validateToolArgs('get_player_activity', { action: 'death', limit: 5 })).not.toThrow();
     expect(() => validateToolArgs('get_player_activity', { limit: 0 })).toThrow();
     expect(() => validateToolArgs('get_player_activity', { limit: 21 })).toThrow();
+  });
+
+  it('validates world reads args', () => {
+    expect(() => validateToolArgs('get_death_ranking', { limit: 3 })).not.toThrow();
+    expect(() => validateToolArgs('get_death_ranking', { limit: 11 })).toThrow();
+    expect(() => validateToolArgs('get_backups', { limit: 0 })).toThrow();
+    expect(() => validateToolArgs('get_recent_errors', { limit: 20 })).not.toThrow();
+    expect(() => validateToolArgs('get_recent_errors', { limit: 21 })).toThrow();
+    expect(() => validateToolArgs('get_player_position', { player_name: 'Wachita' })).not.toThrow();
+    expect(() => validateToolArgs('get_player_position', { foo: 1 } as unknown as Record<string, unknown>)).toThrow();
+  });
+
+  it('registers all world reads', () => {
+    const tools = buildToolDefinitions({ enableModTools: false, enableBroadcastTool: false, serverName: 'ARKNO2' });
+    const names = tools.map((t) => t.function.name);
+    for (const n of ['get_death_ranking', 'get_mod_updates_detail', 'get_next_maintenance', 'get_backups', 'get_world_info', 'get_recent_errors', 'get_player_position']) {
+      expect(names).toContain(n);
+    }
+  });
+
+  it('marks admin-only reads', () => {
+    expect(ADMIN_ONLY_TOOLS.has('get_recent_errors')).toBe(true);
+    expect(ADMIN_ONLY_TOOLS.has('get_player_position')).toBe(true);
+    expect(ADMIN_ONLY_TOOLS.has('get_players')).toBe(false);
+    expect(ADMIN_ONLY_TOOLS.has('get_world_info')).toBe(false);
   });
 });

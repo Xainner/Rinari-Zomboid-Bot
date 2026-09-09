@@ -86,6 +86,90 @@ export function buildToolDefinitions(opts: ToolBuildOptions): ToolDefinition[] {
     {
       type: 'function',
       function: {
+        name: 'get_death_ranking',
+        description: `Quienes mueren mas en ${serverName}, segun las ultimas 100 actividades registradas.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Tamano del ranking (default 5).' },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_mod_updates_detail',
+        description: `Lista con nombre que mods de ${serverName} tienen actualizacion disponible. Vacio significa todo al dia.`,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_next_maintenance',
+        description: `Proxima tarea programada de ${serverName} (backup o reinicio) segun el scheduler del panel.`,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_backups',
+        description: `Estado de los backups de ${serverName}: ultimo backup, cantidad y lista reciente (nombres y tamanos, sin rutas).`,
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Backups recientes a listar (default 5).' },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_world_info',
+        description: `Hora del juego, clima, zombies y mapa de ${serverName} via PanelBridge. Sin datos de jugadores.`,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_recent_errors',
+        description: `Ultimas lineas de error de la consola de ${serverName}, sanitizadas. Solo Xainner.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Lineas a devolver (default 10).' },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_player_position',
+        description: `Posicion en vivo (x, y, z) y salud de jugadores de ${serverName}. Sin player_name lista a todos. Solo Xainner: nunca reveles coordenadas de otros a nadie mas.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            player_name: { type: 'string', minLength: 1, maxLength: 64, description: 'Omitelo para ver a todos.' },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'save_world',
         description: `Solicita al panel guardar el mundo de ${serverName}.`,
         parameters: { type: 'object', properties: {}, additionalProperties: false },
@@ -182,6 +266,13 @@ export const ALLOWED_TOOL_NAMES = new Set([
   'get_players',
   'get_player_hours',
   'get_player_activity',
+  'get_death_ranking',
+  'get_mod_updates_detail',
+  'get_next_maintenance',
+  'get_backups',
+  'get_world_info',
+  'get_recent_errors',
+  'get_player_position',
   'get_mod_status',
   'check_mod_updates',
   'save_world',
