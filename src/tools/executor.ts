@@ -2,6 +2,7 @@ import { PanelClient } from '../panel/client.js';
 import { AppConfig } from '../config.js';
 import { decideMutation, hasMutationRole, isAdmin, MutationTool } from '../security/policy.js';
 import { assertKnownTool, isLifecycleTool, releaseLifecycleLock, tryAcquireLifecycleLock, validateToolArgs, ToolName } from './registry.js';
+import { sanitizeForLog } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
 export interface ExecutionContext {
@@ -140,6 +141,9 @@ export class ToolExecutor {
         authorized: false,
         durationMs: Date.now() - started,
         ok: false,
+        // Sanitized: without this, failures like tonight's expired-token
+        // 401s are indistinguishable from policy denials in the logs.
+        error: sanitizeForLog(err instanceof Error ? `${err.name}: ${err.message}` : String(err)),
       });
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
