@@ -931,6 +931,27 @@ Gating en `ADMIN_ONLY_TOOLS` del registry + chequeo en el executor antes de cual
 
 ---
 
+## Moderación solo-admin (override explícito del dueño a §5.3)
+
+El dueño autorizó abrir estas 6 tools el 2026-09-09, estrictamente solo-admin (sin bypass por rol, sin whitelist/teleport masivo, sin XP/vehículos, sin SteamID bans). Si se quiere ampliar, es otra decisión explícita.
+
+- `kick_player` (`{player_name!, reason?}`) → `POST /api/players/kick`.
+- `ban_player` (`{player_name!, ban_ip?, reason?}`) → `POST /api/players/ban`. Ban plano por defecto; `ban_ip` solo si lo pide.
+- `unban_player` (`{player_name!}`) → `POST /api/players/unban`.
+- `teleport_player` (`{player_name!, target_player? | x!, y!, z?=0}`) → `POST /api/players/teleport`. Exactamente una forma; rangos x/y `0..24000`, z `0..8` (espejo del panel).
+- `give_item` (`{player_name!, item!, count?=1}`) → `POST /api/players/add-item`. Formato `Module.Item` + count `1..100` (espejo del panel).
+- `set_godmode` (`{player_name!, enabled!}`) → `POST /api/players/godmode`. Pasa `via`/`warning` del panel al modelo (RCON tiene limitaciones conocidas).
+
+Reglas de implementación (todas en código, no en prompt):
+1. Gating en `ADMIN_ONLY_TOOLS` antes de cualquier ejecución; el executor corre estas tools directo sin `decideMutation`.
+2. `assertArkno2Active()` antes de cada mutación, como todas las demás.
+3. `success: false` con HTTP 200 del panel se trata como fallo (RCON falla contra jugadores offline sin código de error HTTP).
+4. Validación espejo del panel en cliente + registry (username, SAFE_TEXT, item ID, rangos).
+5. Log `panel_mutation` con endpoint + jugador + requester (vía `tool_execution`).
+6. Nunca adivinar nombres: el prompt exige pedir aclaración si es ambiguo.
+
+---
+
 ## `get_mod_status`
 
 Disponible solo con:

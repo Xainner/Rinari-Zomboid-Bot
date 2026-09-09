@@ -142,6 +142,16 @@ export interface PlayerPositionResult {
   found?: boolean;
 }
 
+export interface PlayerModerationResult {
+  ok: boolean;
+  server: string;
+  player: string;
+  /** How the panel executed it (e.g. bridge vs rcon), when reported. */
+  via?: string;
+  /** Panel-side caveat (e.g. RCON targeting limits), when reported. */
+  warning?: string;
+}
+
 export interface ModStatusResult {
   ok: boolean;
   server: string;

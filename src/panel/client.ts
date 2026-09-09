@@ -1,5 +1,5 @@
 import { PanelAuth } from './auth.js';
-import { ActiveServer, Arkno2Status, BackupsResult, BackupSummary, DeathRankingResult, ModStatusResult, ModUpdatesDetailResult, NextMaintenanceResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayerPosition, PlayerPositionResult, PlayersResult, PolicyError, RecentErrorsResult, WorldInfoResult } from './types.js';
+import { ActiveServer, Arkno2Status, BackupsResult, BackupSummary, DeathRankingResult, ModStatusResult, ModUpdatesDetailResult, NextMaintenanceResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayerModerationResult, PlayerPosition, PlayerPositionResult, PlayersResult, PolicyError, RecentErrorsResult, WorldInfoResult } from './types.js';
 import { sanitizeConsoleLine, sanitizeServerMessage } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
@@ -394,6 +394,143 @@ export class PanelClient {
       return { ok: true, server: this.opts.serverName, available: true, scope: 'player', found: true, entry };
     }
     return { ok: true, server: this.opts.serverName, available: true, scope: 'all', count: positions.length, positions };
+  }
+
+  // ─── Admin-only player moderation ──────────────────────────────────────
+  // Every method asserts the active server first and refuses to report
+  // success unless the panel confirms it (RCON routinely fails against
+  // offline players with HTTP 200 + { success: false }).
+
+  private static assertSafeText(reason: unknown): string | undefined {
+    if (reason === undefined) return undefined;
+    if (typeof reason !== 'string' || reason.length > 256) {
+      throw new PolicyError('reason must be a string of at most 256 characters');
+    }
+    // Mirror the panel's SAFE_TEXT guard (trailing - is a literal hyphen).
+    if (!/^[a-zA-Z0-9\s.,!?'":;()@#&+=%_\u00C0-\u024F-]{0,256}$/.test(reason)) {
+      throw new PolicyError('reason has an invalid format');
+    }
+    return reason;
+  }
+
+  private static assertItemId(item: unknown): string {
+    if (typeof item !== 'string' || item.length < 1 || item.length > 64) {
+      throw new PolicyError('item must be a string like Base.Axe (1..64 chars)');
+    }
+    if (!/^[A-Za-z0-9_]+\.[A-Za-z0-9_&#+.-]+$/.test(item)) {
+      throw new PolicyError('item must look like Module.ItemName (e.g. Base.Axe)');
+    }
+    return item;
+  }
+
+  private assertModerationSuccess(data: unknown, label: string): Record<string, unknown> {
+    const obj = data as Record<string, unknown> | null;
+    if (obj && typeof obj['success'] === 'boolean' && obj['success'] === false) {
+      const detail = typeof obj['error'] === 'string' ? (obj['error'] as string) : label;
+      throw new Error(`Panel reported failure: ${detail}`.slice(0, 300));
+    }
+    return (obj ?? {}) as Record<string, unknown>;
+  }
+
+  private moderationResult(player: string, data: Record<string, unknown>): PlayerModerationResult {
+    const out: PlayerModerationResult = { ok: true, server: this.opts.serverName, player };
+    if (typeof data['via'] === 'string') out.via = data['via'] as string;
+    if (typeof data['warning'] === 'string') out.warning = (data['warning'] as string).slice(0, 300);
+    return out;
+  }
+
+  async kickPlayer(playerName: string, reason?: string): Promise<PlayerModerationResult> {
+    const clean = PanelClient.assertPlayerName(playerName);
+    const safeReason = PanelClient.assertSafeText(reason);
+    await this.assertArkno2Active();
+    const data = await this.call<unknown>(
+      'POST',
+      '/api/players/kick',
+      safeReason === undefined ? { username: clean } : { username: clean, reason: safeReason },
+    );
+    logger.info('panel_mutation', { endpoint: 'kickPlayer', server: this.opts.serverName, player: clean });
+    return this.moderationResult(clean, this.assertModerationSuccess(data, 'kick failed'));
+  }
+
+  async banPlayer(playerName: string, banIp?: boolean, reason?: string): Promise<PlayerModerationResult> {
+    const clean = PanelClient.assertPlayerName(playerName);
+    if (banIp !== undefined && typeof banIp !== 'boolean') throw new PolicyError('ban_ip must be a boolean');
+    const safeReason = PanelClient.assertSafeText(reason);
+    await this.assertArkno2Active();
+    const data = await this.call<unknown>('POST', '/api/players/ban', {
+      username: clean,
+      ...(banIp === undefined ? {} : { banIp }),
+      ...(safeReason === undefined ? {} : { reason: safeReason }),
+    });
+    logger.info('panel_mutation', { endpoint: 'banPlayer', server: this.opts.serverName, player: clean });
+    return this.moderationResult(clean, this.assertModerationSuccess(data, 'ban failed'));
+  }
+
+  async unbanPlayer(playerName: string): Promise<PlayerModerationResult> {
+    const clean = PanelClient.assertPlayerName(playerName);
+    await this.assertArkno2Active();
+    const data = await this.call<unknown>('POST', '/api/players/unban', { username: clean });
+    logger.info('panel_mutation', { endpoint: 'unbanPlayer', server: this.opts.serverName, player: clean });
+    return this.moderationResult(clean, this.assertModerationSuccess(data, 'unban failed'));
+  }
+
+  async teleportPlayer(
+    playerName: string,
+    targetPlayer?: string,
+    x?: number,
+    y?: number,
+    z?: number,
+  ): Promise<PlayerModerationResult> {
+    const clean = PanelClient.assertPlayerName(playerName);
+    const target = targetPlayer === undefined ? undefined : PanelClient.assertPlayerName(targetPlayer);
+    const hasCoords = x !== undefined || y !== undefined || z !== undefined;
+    if (target !== undefined && hasCoords) {
+      throw new PolicyError('teleport takes either target_player or coordinates, not both');
+    }
+    if (target === undefined && (x === undefined || y === undefined)) {
+      throw new PolicyError('teleport needs target_player or x and y coordinates');
+    }
+    let body: Record<string, unknown>;
+    if (target !== undefined) {
+      body = { player1: clean, player2: target };
+    } else {
+      const zz = z ?? 0;
+      for (const [label, v, max] of [['x', x, 24000], ['y', y, 24000], ['z', zz, 8]] as const) {
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > max) {
+          throw new PolicyError(`${label} must be a number in range 0..${max}`);
+        }
+      }
+      body = { player1: clean, x, y, z: zz };
+    }
+    await this.assertArkno2Active();
+    const data = await this.call<unknown>('POST', '/api/players/teleport', body);
+    logger.info('panel_mutation', { endpoint: 'teleportPlayer', server: this.opts.serverName, player: clean });
+    return this.moderationResult(clean, this.assertModerationSuccess(data, 'teleport failed'));
+  }
+
+  async giveItem(playerName: string, item: string, count = 1): Promise<PlayerModerationResult> {
+    const clean = PanelClient.assertPlayerName(playerName);
+    const itemId = PanelClient.assertItemId(item);
+    if (!Number.isInteger(count) || count < 1 || count > 100) {
+      throw new PolicyError('count must be an integer in range 1..100');
+    }
+    await this.assertArkno2Active();
+    const data = await this.call<unknown>('POST', '/api/players/add-item', {
+      username: clean,
+      item: itemId,
+      count,
+    });
+    logger.info('panel_mutation', { endpoint: 'giveItem', server: this.opts.serverName, player: clean });
+    return this.moderationResult(clean, this.assertModerationSuccess(data, 'give-item failed'));
+  }
+
+  async setGodmode(playerName: string, enabled: boolean): Promise<PlayerModerationResult> {
+    const clean = PanelClient.assertPlayerName(playerName);
+    if (typeof enabled !== 'boolean') throw new PolicyError('enabled must be a boolean');
+    await this.assertArkno2Active();
+    const data = await this.call<unknown>('POST', '/api/players/godmode', { username: clean, enabled });
+    logger.info('panel_mutation', { endpoint: 'setGodmode', server: this.opts.serverName, player: clean });
+    return this.moderationResult(clean, this.assertModerationSuccess(data, 'godmode failed'));
   }
 
   async getModStatus(): Promise<ModStatusResult> {
