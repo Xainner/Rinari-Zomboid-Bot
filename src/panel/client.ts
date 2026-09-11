@@ -17,6 +17,27 @@ function sleep(ms: number): Promise<void> {
 export class PanelClient {
   constructor(private opts: PanelClientOptions) {}
 
+  /** Harness v2 retry policy (doc 01 section 6): GET retries only on truly transient conditions. */
+  private static isTransientForRetry(err: unknown): boolean {
+    if (err instanceof PanelError) {
+      return err.status === 408 || err.status === 429 || err.status === 502 || err.status === 503 || err.status === 504;
+    }
+    const name = (err as { name?: string })?.name ?? '';
+    const msg = err instanceof Error ? err.message : String(err);
+    // fetch timeout (AbortError), network TypeError, undici timeouts.
+    return (
+      name === 'AbortError' ||
+      name === 'TimeoutError' ||
+      /aborted|timeout|timed out|network|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(msg)
+    );
+  }
+
+  private static isTimeout(err: unknown): boolean {
+    const name = (err as { name?: string })?.name ?? '';
+    const msg = err instanceof Error ? err.message : String(err);
+    return name === 'AbortError' || name === 'TimeoutError' || /aborted|timeout|timed out|ETIMEDOUT/i.test(msg);
+  }
+
   private async call<T>(method: string, path: string, body?: unknown, opts?: { retryGet?: boolean }): Promise<T> {
     const attempt = async (token: string): Promise<T> => {
       const ctrl = new AbortController();
@@ -37,6 +58,13 @@ export class PanelClient {
         if (!res.ok) throw new PanelError(`Panel request failed: ${method} ${path}`, res.status);
         if (res.status === 204) return undefined as T;
         return (await res.json().catch(() => undefined)) as T;
+      } catch (err) {
+        // POST timeout is ambiguous: the panel may have received the action.
+        // Never auto-retry; surface unknown_outcome so the caller verifies via GET.
+        if (method !== 'GET' && PanelClient.isTimeout(err)) {
+          throw new PanelError(`Panel ${method} ${path} timed out after send (outcome unknown)`, 0, 'REQUEST_TIMEOUT_AFTER_SEND');
+        }
+        throw err;
       } finally {
         clearTimeout(t);
       }
@@ -52,6 +80,8 @@ export class PanelClient {
         lastErr = err;
         if (err instanceof PanelError && (err.status === 401 || err.status === 403 || err.status === 409)) throw err;
         if (!isGet) throw err;
+        // Only transient failures deserve a GET retry; contract errors (400/404/500) fail fast.
+        if (!PanelClient.isTransientForRetry(err)) throw err;
         if (i < tries - 1) await sleep(300 * (i + 1));
       }
     }
@@ -86,12 +116,15 @@ export class PanelClient {
   async getArkno2Status(): Promise<Arkno2Status> {
     const status = await this.call<Record<string, unknown>>('GET', '/api/servers/active/status');
     let consoleErrors = 0;
+    let consoleErrorsUnavailable = false;
     try {
       const ec = await this.call<Record<string, unknown>>('GET', '/api/server/console-log/error-count');
       const n = ec?.['count'] ?? ec?.['errorCount'] ?? 0;
       if (typeof n === 'number') consoleErrors = n;
+      else consoleErrorsUnavailable = true;
     } catch {
-      consoleErrors = 0;
+      // Harness v2 §7: never report "0 errors" when the endpoint failed.
+      consoleErrorsUnavailable = true;
     }
     const pick = (v: unknown): string => (typeof v === 'string' ? v : 'unknown');
     return {
@@ -101,6 +134,7 @@ export class PanelClient {
       rcon: pick(status?.['rcon']),
       panelBridge: pick(status?.['panelBridge'] ?? status?.['bridge']),
       consoleErrors,
+      ...(consoleErrorsUnavailable ? { consoleErrorsUnavailable, partial: true, code: 'CONSOLE_ERROR_COUNT_UNAVAILABLE' } : {}),
     };
   }
 
@@ -300,20 +334,29 @@ export class PanelClient {
   }
 
   async getWorldInfo(): Promise<WorldInfoResult> {
-    const get = (path: string): Promise<Record<string, unknown> | null> =>
+    const unavailable: string[] = [];
+    const get = (section: string, path: string): Promise<Record<string, unknown> | null> =>
       this.call<Record<string, unknown>>('GET', path)
         .then((r) => ((r?.['data'] as Record<string, unknown>) ?? r ?? null) as Record<string, unknown> | null)
-        .catch(() => null);
+        .catch(() => {
+          unavailable.push(section);
+          return null;
+        });
     const [weather, time, world] = await Promise.all([
-      get('/api/panel-bridge/weather'),
-      get('/api/panel-bridge/time'),
-      get('/api/panel-bridge/world/stats'),
+      get('weather', '/api/panel-bridge/weather'),
+      get('time', '/api/panel-bridge/time'),
+      get('world', '/api/panel-bridge/world/stats'),
     ]);
     if (!weather && !time && !world) {
-      return { ok: true, server: this.opts.serverName, available: false };
+      return { ok: true, server: this.opts.serverName, available: false, unavailable, partial: true, code: 'BRIDGE_UNAVAILABLE' };
     }
     const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-    const out: WorldInfoResult = { ok: true, server: this.opts.serverName, available: true };
+    const out: WorldInfoResult = {
+      ok: true,
+      server: this.opts.serverName,
+      available: true,
+      ...(unavailable.length > 0 ? { unavailable, partial: true, code: 'BRIDGE_PARTIAL' } : {}),
+    };
     if (time) {
       out.time = {
         year: num(time['year']) ?? 0,
@@ -534,13 +577,24 @@ export class PanelClient {
   }
 
   async getModStatus(): Promise<ModStatusResult> {
+    const missing: string[] = [];
+    // Harness v2 §7: track which sub-endpoint failed instead of defaulting silently.
     const status = await this.call<Record<string, unknown>>('GET', '/api/mods/status').catch(
-      (): Record<string, unknown> => ({}),
+      (): Record<string, unknown> => {
+        missing.push('status');
+        return {};
+      },
     );
     // NOTE: GET /api/mods/tracked returns { mods: [...] }, not a bare array.
-    const trackedRaw = await this.call<unknown>('GET', '/api/mods/tracked').catch(() => []);
+    const trackedRaw = await this.call<unknown>('GET', '/api/mods/tracked').catch(() => {
+      missing.push('tracked');
+      return [];
+    });
     const sched = await this.call<Record<string, unknown>>('GET', '/api/scheduler/status').catch(
-      (): Record<string, unknown> => ({}),
+      (): Record<string, unknown> => {
+        missing.push('scheduler');
+        return {};
+      },
     );
     const trackedList = Array.isArray(trackedRaw)
       ? trackedRaw
@@ -567,6 +621,7 @@ export class PanelClient {
       pendingRestart: pending,
       tracked,
       updatesAvailable,
+      ...(missing.length > 0 ? { partial: true, code: 'MOD_STATUS_UNAVAILABLE', missing } : {}),
     };
   }
 

@@ -1,7 +1,10 @@
 import { PanelClient } from '../panel/client.js';
+import { PanelError } from '../panel/types.js';
 import { AppConfig } from '../config.js';
 import { decideMutation, hasMutationRole, isAdmin, MutationTool } from '../security/policy.js';
 import { assertKnownTool, isLifecycleTool, releaseLifecycleLock, tryAcquireLifecycleLock, validateToolArgs, ADMIN_ONLY_TOOLS, ToolName } from './registry.js';
+import { concurrencyDomainForTool, releaseDomainLock, tryAcquireDomainLock } from './concurrency.js';
+import { newActionId, ToolStatus } from './toolResult.js';
 import { sanitizeForLog } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
@@ -16,6 +19,14 @@ export interface ExecutionResult {
   data?: unknown;
   error?: string;
   denied?: boolean;
+  /** Harness v2 standard fields (doc 01 sections 3-4). Kept alongside ok/denied for compat. */
+  status?: ToolStatus;
+  code?: string;
+  retryable?: boolean;
+  actionId?: string;
+  durationMs?: number;
+  sideEffect?: boolean;
+  verified?: boolean;
 }
 
 export class ToolExecutor {
@@ -32,8 +43,51 @@ export class ToolExecutor {
     executor.lastLifecycleAt.clear();
   }
 
+  private mapErrorToResult(tool: string, err: unknown, started: number, actionId: string): ExecutionResult {
+    const durationMs = Date.now() - started;
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    // Unknown tool: fail-closed, never retryable.
+    if (/^UNKNOWN_TOOL/.test(rawMsg)) {
+      return { ok: false, error: rawMsg, status: 'failed', code: 'UNKNOWN_TOOL', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
+    }
+    // Schema/validation failures are explicit, never silent {}.
+    if (/Invalid argument|must be|is required|out of range|invalid format/i.test(rawMsg)) {
+      return { ok: false, error: rawMsg, status: 'failed', code: 'INVALID_TOOL_ARGUMENTS', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
+    }
+    if (err instanceof PanelError) {
+      if (err.code === 'REQUEST_TIMEOUT_AFTER_SEND') {
+        return {
+          ok: false,
+          error: 'La orden se envió pero el panel no respondió a tiempo; resultado desconocido. Verifica el estado antes de repetir.',
+          status: 'unknown_outcome',
+          code: 'REQUEST_TIMEOUT_AFTER_SEND',
+          retryable: false,
+          actionId,
+          durationMs,
+          sideEffect: true,
+          verified: false,
+        };
+      }
+      if (err.status === 408 || err.status === 429 || err.status === 502 || err.status === 503 || err.status === 504) {
+        return { ok: false, error: rawMsg, status: 'retryable_error', code: `PANEL_${err.status}`, retryable: true, actionId, durationMs, sideEffect: false, verified: false };
+      }
+      if (err.status === 403 || err.code === 'FORBIDDEN') {
+        return { ok: false, error: rawMsg, status: 'failed', code: 'PANEL_FORBIDDEN', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
+      }
+      if (err.status === 409 || err.code === 'CONFLICT') {
+        return { ok: false, error: rawMsg, status: 'failed', code: 'PANEL_CONFLICT', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
+      }
+    }
+    if (/Active server mismatch/.test(rawMsg)) {
+      return { ok: false, error: rawMsg, status: 'failed', code: 'SERVER_MISMATCH', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
+    }
+    return { ok: false, error: rawMsg, status: 'failed', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
+  }
+
   async execute(tool: string, rawArgs: unknown, ctx: ExecutionContext): Promise<ExecutionResult> {
     const started = Date.now();
+    const actionId = newActionId();
+    const duration = (): number => Date.now() - started;
     try {
       assertKnownTool(tool);
       const args = (rawArgs ?? {}) as Record<string, unknown>;
@@ -53,29 +107,55 @@ export class ToolExecutor {
             requesterId: ctx.authorId,
             server: this.config.pzServerName,
             authorized: false,
-            durationMs: Date.now() - started,
+            durationMs: duration(),
             ok: false,
             error: 'admin only',
+            actionId,
+            status: 'denied',
           });
-          return { ok: false, denied: true, error: 'Solo Xainner puede usar esa herramienta.' };
+          return { ok: false, denied: true, error: 'Solo Xainner puede usar esa herramienta.', status: 'denied', code: 'ADMIN_ONLY', retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
         }
-        const data = this.isReadOnly(tool as ToolName)
-          ? await this.runRead(tool as ToolName, args)
-          : await this.runMutation(tool as ToolName, args, undefined);
-        logger.info('tool_execution', {
-          tool,
-          requesterId: ctx.authorId,
-          server: this.config.pzServerName,
-          authorized: true,
-          durationMs: Date.now() - started,
-          ok: true,
-        });
-        return { ok: true, data };
+        const toolName = tool as ToolName;
+        if (this.isReadOnly(toolName)) {
+          const data = await this.runRead(toolName, args);
+          logger.info('tool_execution', {
+            tool,
+            requesterId: ctx.authorId,
+            server: this.config.pzServerName,
+            authorized: true,
+            durationMs: duration(),
+            ok: true,
+            actionId,
+            status: 'success',
+          });
+          return { ok: true, data, status: 'success', actionId, durationMs: duration(), sideEffect: false, verified: false };
+        }
+        // Admin mutation: domain lock, no lifecycle dedupe bypass.
+        const domain = concurrencyDomainForTool(toolName);
+        if (!tryAcquireDomainLock(this.config.pzServerName, domain)) {
+          return { ok: false, denied: true, error: `Another ${domain} operation is already in progress`, status: 'denied', code: 'DOMAIN_BUSY', retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
+        }
+        try {
+          const data = await this.runMutation(toolName, args, undefined);
+          logger.info('tool_execution', {
+            tool,
+            requesterId: ctx.authorId,
+            server: this.config.pzServerName,
+            authorized: true,
+            durationMs: duration(),
+            ok: true,
+            actionId,
+            status: 'success',
+          });
+          return { ok: true, data, status: 'success', actionId, durationMs: duration(), sideEffect: true, verified: false };
+        } finally {
+          releaseDomainLock(this.config.pzServerName, domain);
+        }
       }
 
       if (this.isReadOnly(tool as ToolName)) {
         if ((tool === 'get_mod_status' || tool === 'check_mod_updates') && !this.config.enableModTools) {
-          return { ok: false, denied: true, error: 'Mod tools are disabled' };
+          return { ok: false, denied: true, error: 'Mod tools are disabled', status: 'denied', code: 'FEATURE_DISABLED', retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
         }
         const data = await this.runRead(tool as ToolName, args);
         logger.info('tool_execution', {
@@ -83,10 +163,12 @@ export class ToolExecutor {
           requesterId: ctx.authorId,
           server: this.config.pzServerName,
           authorized: true,
-          durationMs: Date.now() - started,
+          durationMs: duration(),
           ok: true,
+          actionId,
+          status: 'success',
         });
-        return { ok: true, data };
+        return { ok: true, data, status: 'success', actionId, durationMs: duration(), sideEffect: false, verified: false };
       }
 
       const decision = decideMutation({
@@ -109,74 +191,102 @@ export class ToolExecutor {
           requesterId: ctx.authorId,
           server: this.config.pzServerName,
           authorized: false,
-          durationMs: Date.now() - started,
+          durationMs: duration(),
           ok: false,
+          actionId,
+          status: 'denied',
         });
-        return { ok: false, denied: true, error: decision.reason };
+        return { ok: false, denied: true, error: decision.reason, status: 'denied', code: 'POLICY_DENIED', retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
       }
 
-      if (isLifecycleTool(tool)) {
-        if (!tryAcquireLifecycleLock()) {
-          return { ok: false, denied: true, error: 'Another lifecycle operation is already in progress' };
-        }
-        try {
-          const sinceLast = Date.now() - (this.lastLifecycleAt.get(tool) ?? 0);
-          if (sinceLast < ToolExecutor.LIFECYCLE_DEDUPE_MS) {
-            const waitS = Math.ceil((ToolExecutor.LIFECYCLE_DEDUPE_MS - sinceLast) / 1000);
+      const toolName = tool as ToolName;
+      const domain = concurrencyDomainForTool(toolName);
+      if (!tryAcquireDomainLock(this.config.pzServerName, domain)) {
+        return { ok: false, denied: true, error: `Another ${domain} operation is already in progress`, status: 'denied', code: 'DOMAIN_BUSY', retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
+      }
+      try {
+        if (isLifecycleTool(tool)) {
+          if (!tryAcquireLifecycleLock()) {
+            return { ok: false, denied: true, error: 'Another lifecycle operation is already in progress', status: 'denied', code: 'LIFECYCLE_BUSY', retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
+          }
+          try {
+            const sinceLast = Date.now() - (this.lastLifecycleAt.get(tool) ?? 0);
+            if (sinceLast < ToolExecutor.LIFECYCLE_DEDUPE_MS) {
+              const waitS = Math.ceil((ToolExecutor.LIFECYCLE_DEDUPE_MS - sinceLast) / 1000);
+              logger.info('tool_execution', {
+                tool,
+                requesterId: ctx.authorId,
+                server: this.config.pzServerName,
+                authorized: false,
+                durationMs: duration(),
+                ok: false,
+                actionId,
+                status: 'denied',
+              });
+              return {
+                ok: false,
+                denied: true,
+                error: `${tool} was already executed ${Math.floor(sinceLast / 1000)}s ago. Not repeating it; wait ${waitS}s before asking again.`,
+                status: 'denied',
+                code: 'LIFECYCLE_DEDUPE',
+                retryable: false,
+                actionId,
+                durationMs: duration(),
+                sideEffect: false,
+                verified: false,
+              };
+            }
+            const data = await this.runMutation(toolName, args, decision.clampedWarningMinutes);
+            this.lastLifecycleAt.set(tool, Date.now());
             logger.info('tool_execution', {
               tool,
               requesterId: ctx.authorId,
               server: this.config.pzServerName,
-              authorized: false,
-              durationMs: Date.now() - started,
-              ok: false,
+              authorized: true,
+              durationMs: duration(),
+              ok: true,
+              actionId,
+              status: 'success',
+              args: ToolExecutor.safeArgs(toolName, args, decision.clampedWarningMinutes),
             });
-            return {
-              ok: false,
-              denied: true,
-              error: `${tool} was already executed ${Math.floor(sinceLast / 1000)}s ago. Not repeating it; wait ${waitS}s before asking again.`,
-            };
+            return { ok: true, data, status: 'success', actionId, durationMs: duration(), sideEffect: true, verified: false };
+          } finally {
+            releaseLifecycleLock();
           }
-          const data = await this.runMutation(tool as ToolName, args, decision.clampedWarningMinutes);
-          this.lastLifecycleAt.set(tool, Date.now());
-          logger.info('tool_execution', {
-            tool,
-            requesterId: ctx.authorId,
-            server: this.config.pzServerName,
-            authorized: true,
-            durationMs: Date.now() - started,
-            ok: true,
-            args: ToolExecutor.safeArgs(tool as ToolName, args, decision.clampedWarningMinutes),
-          });
-          return { ok: true, data };
-        } finally {
-          releaseLifecycleLock();
         }
-      }
 
-      const data = await this.runMutation(tool as ToolName, args, decision.clampedWarningMinutes);
-      logger.info('tool_execution', {
-        tool,
-        requesterId: ctx.authorId,
-        server: this.config.pzServerName,
-        authorized: true,
-        durationMs: Date.now() - started,
-        ok: true,
-      });
-      return { ok: true, data };
+        const data = await this.runMutation(toolName, args, decision.clampedWarningMinutes);
+        logger.info('tool_execution', {
+          tool,
+          requesterId: ctx.authorId,
+          server: this.config.pzServerName,
+          authorized: true,
+          durationMs: duration(),
+          ok: true,
+          actionId,
+          status: 'success',
+        });
+        return { ok: true, data, status: 'success', actionId, durationMs: duration(), sideEffect: true, verified: false };
+      } finally {
+        releaseDomainLock(this.config.pzServerName, domain);
+      }
     } catch (err) {
+      const mapped = this.mapErrorToResult(tool, err, started, actionId);
       logger.warn('tool_execution', {
         tool,
         requesterId: ctx.authorId,
         server: this.config.pzServerName,
         authorized: false,
-        durationMs: Date.now() - started,
+        durationMs: mapped.durationMs,
         ok: false,
-        // Sanitized: without this, failures like tonight's expired-token
+        actionId,
+        status: mapped.status,
+        code: mapped.code,
+        // Sanitized: without this, failures like expired-token
         // 401s are indistinguishable from policy denials in the logs.
         error: sanitizeForLog(err instanceof Error ? `${err.name}: ${err.message}` : String(err)),
       });
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return mapped;
     }
   }
 
