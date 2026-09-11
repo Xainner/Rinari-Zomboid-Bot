@@ -4,7 +4,6 @@ import { buildSystemPrompt } from './systemPrompt.js';
 import { buildToolDefinitions, ToolDefinition, ALLOWED_TOOL_NAMES } from '../tools/definitions.js';
 import { projectToolResultForLlm, serializeForLlm } from '../tools/projector.js';
 import { ToolExecutor } from '../tools/executor.js';
-import { isLifecycleTool } from '../tools/registry.js';
 import { ConversationStore } from '../state/conversationStore.js';
 import { isAdmin } from '../security/policy.js';
 import { sanitizeDiscord, sanitizeForLog } from '../security/sanitize.js';
@@ -18,15 +17,9 @@ export interface IncomingMessage {
   text: string;
 }
 
-const MUTATION_TOOLS = new Set([
-  'save_world',
-  'restart_server',
-  'start_server',
-  'stop_server',
-  'broadcast_server_message',
-  'cancel_pending_mod_restart',
-  'check_mod_updates',
-]);
+export interface OrchestratorHooks {
+  onIntent?: (intent: string) => Promise<void>;
+}
 
 interface ChatMsg {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -109,7 +102,7 @@ export class Orchestrator {
     return !!msg && (msg.content?.trim() ?? '') === '' && (msg.tool_calls ?? []).length === 0;
   }
 
-  async handle(msg: IncomingMessage, hooks?: { onToolStart?: (tool: string) => Promise<void> }): Promise<string> {
+  async handle(msg: IncomingMessage, hooks?: OrchestratorHooks): Promise<string> {
     try {
       return await this.run(msg, hooks);
     } catch (err) {
@@ -120,7 +113,7 @@ export class Orchestrator {
     }
   }
 
-  private async run(msg: IncomingMessage, hooks?: { onToolStart?: (tool: string) => Promise<void> }): Promise<string> {
+  private async run(msg: IncomingMessage, hooks?: OrchestratorHooks): Promise<string> {
     const adminUser = isAdmin(msg.authorId, this.config.adminUserId);
     await this.store.append(msg.channelId, {
       role: 'user',
@@ -174,6 +167,17 @@ export class Orchestrator {
         content: choice.content ?? '',
         tool_calls: calls as unknown[],
       } as ChatMsg);
+      // Doc 02 §5-§7: la intención es el content del mismo tool call, opcional,
+      // una por ronda. Si está vacío, se ejecutan las tools en silencio.
+      // Nunca autoriza nada: el executor valida igual (doc 02 §16).
+      const intent = (choice.content ?? '').trim();
+      if (intent !== '') {
+        try {
+          await hooks?.onIntent?.(sanitizeDiscord(intent));
+        } catch {
+          logger.warn('intent_update_failed', {});
+        }
+      }
       for (const call of calls) {
         if (toolCallsMade >= this.config.maxToolCallsPerMessage) break;
         toolCallsMade++;
@@ -197,22 +201,15 @@ export class Orchestrator {
           });
           continue;
         }
-        if (MUTATION_TOOLS.has(name) || isLifecycleTool(name)) {
-          try {
-            await hooks?.onToolStart?.(name);
-          } catch {
-            logger.warn('progress_update_failed', { tool: name });
-          }
-        }
         const result = await this.executor.execute(name, args, {
           authorId: msg.authorId,
           memberRoleIds: msg.memberRoleIds,
           channelId: msg.channelId,
         });
-        const execRes = result as { ok?: boolean; data?: unknown; status?: string; code?: string; error?: string };
+        const execRes = result as { ok?: boolean; data?: unknown; status?: string; code?: string; error?: string; reason?: string; tool?: string };
         const projected = execRes.ok
           ? projectToolResultForLlm(name, execRes.data ?? {})
-          : { ok: false, status: execRes.status ?? 'failed', code: execRes.code, error: execRes.error };
+          : { ok: false, status: execRes.status ?? 'failed', code: execRes.code, reason: execRes.reason, tool: execRes.tool ?? name, error: execRes.error };
         messages.push({
           role: 'tool',
           content: serializeForLlm(projected),

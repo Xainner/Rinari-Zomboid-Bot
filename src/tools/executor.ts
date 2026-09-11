@@ -22,6 +22,10 @@ export interface ExecutionResult {
   /** Harness v2 standard fields (doc 01 sections 3-4). Kept alongside ok/denied for compat. */
   status?: ToolStatus;
   code?: string;
+  /** Machine-readable reason, e.g. requester_is_not_admin. Never dialogue for Discord. */
+  reason?: string;
+  /** Tool name that was attempted. Helps the LLM redact without guessing. */
+  tool?: string;
   retryable?: boolean;
   actionId?: string;
   durationMs?: number;
@@ -58,9 +62,11 @@ export class ToolExecutor {
       if (err.code === 'REQUEST_TIMEOUT_AFTER_SEND' || err.code === 'REQUEST_SEND_AMBIGUOUS') {
         return {
           ok: false,
-          error: 'La orden se envió pero el panel no respondió a tiempo; resultado desconocido. Verifica el estado antes de repetir.',
+          error: `${err.code}: outcome unknown, verify via GET before retry`,
           status: 'unknown_outcome',
           code: err.code,
+          reason: 'timeout_after_send',
+          tool,
           retryable: false,
           actionId,
           durationMs,
@@ -74,9 +80,11 @@ export class ToolExecutor {
         if (isMutation) {
           return {
             ok: false,
-            error: `El panel devolvió ${err.status} tras una mutación; resultado desconocido. Verifica el estado antes de repetir.`,
+            error: `PANEL_${err.status}_AFTER_SEND: outcome unknown, verify via GET before retry`,
             status: 'unknown_outcome',
             code: `PANEL_${err.status}_AFTER_SEND`,
+            reason: 'transient_after_send',
+            tool,
             retryable: false,
             actionId,
             durationMs,
@@ -128,7 +136,7 @@ export class ToolExecutor {
             actionId,
             status: 'denied',
           });
-          return { ok: false, denied: true, error: 'Solo Xainner puede usar esa herramienta.', status: 'denied', code: 'ADMIN_ONLY', retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
+          return { ok: false, denied: true, error: 'ADMIN_ONLY: requester_is_not_admin', status: 'denied', code: 'ADMIN_ONLY', reason: 'requester_is_not_admin', tool, retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
         }
         const toolName = tool as ToolName;
         if (this.isReadOnly(toolName)) {
@@ -148,7 +156,7 @@ export class ToolExecutor {
         // Admin mutation: domain lock, no lifecycle dedupe bypass.
         const domain = concurrencyDomainForTool(toolName);
         if (!tryAcquireDomainLock(this.config.pzServerName, domain)) {
-          return { ok: false, denied: true, error: `Another ${domain} operation is already in progress`, status: 'denied', code: 'DOMAIN_BUSY', retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
+          return { ok: false, denied: true, error: 'DOMAIN_BUSY', status: 'denied', code: 'DOMAIN_BUSY', reason: 'domain_locked', tool, retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
         }
         try {
           const data = await this.runMutation(toolName, args, undefined);
@@ -170,7 +178,7 @@ export class ToolExecutor {
 
       if (this.isReadOnly(tool as ToolName)) {
         if ((tool === 'get_mod_status' || tool === 'check_mod_updates') && !this.config.enableModTools) {
-          return { ok: false, denied: true, error: 'Mod tools are disabled', status: 'denied', code: 'FEATURE_DISABLED', retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
+          return { ok: false, denied: true, error: 'FEATURE_DISABLED: mod_tools_disabled', status: 'denied', code: 'FEATURE_DISABLED', reason: 'mod_tools_disabled', tool, retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
         }
         const data = await this.runRead(tool as ToolName, args);
         logger.info('tool_execution', {
@@ -211,23 +219,22 @@ export class ToolExecutor {
           actionId,
           status: 'denied',
         });
-        return { ok: false, denied: true, error: decision.reason, status: 'denied', code: 'POLICY_DENIED', retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
+        return { ok: false, denied: true, error: `POLICY_DENIED: ${decision.reason}`, status: 'denied', code: 'POLICY_DENIED', reason: decision.reason, tool, retryable: false, actionId, durationMs: duration(), sideEffect: false, verified: false };
       }
 
       const toolName = tool as ToolName;
       const domain = concurrencyDomainForTool(toolName);
       if (!tryAcquireDomainLock(this.config.pzServerName, domain)) {
-        return { ok: false, denied: true, error: `Another ${domain} operation is already in progress`, status: 'denied', code: 'DOMAIN_BUSY', retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
+        return { ok: false, denied: true, error: 'DOMAIN_BUSY', status: 'denied', code: 'DOMAIN_BUSY', reason: 'domain_locked', tool, retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
       }
       try {
         if (isLifecycleTool(tool)) {
           if (!tryAcquireLifecycleLock()) {
-            return { ok: false, denied: true, error: 'Another lifecycle operation is already in progress', status: 'denied', code: 'LIFECYCLE_BUSY', retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
+            return { ok: false, denied: true, error: 'LIFECYCLE_BUSY', status: 'denied', code: 'LIFECYCLE_BUSY', reason: 'lifecycle_locked', tool, retryable: true, actionId, durationMs: duration(), sideEffect: false, verified: false };
           }
           try {
             const sinceLast = Date.now() - (this.lastLifecycleAt.get(tool) ?? 0);
             if (sinceLast < ToolExecutor.LIFECYCLE_DEDUPE_MS) {
-              const waitS = Math.ceil((ToolExecutor.LIFECYCLE_DEDUPE_MS - sinceLast) / 1000);
               logger.info('tool_execution', {
                 tool,
                 requesterId: ctx.authorId,
@@ -241,9 +248,11 @@ export class ToolExecutor {
               return {
                 ok: false,
                 denied: true,
-                error: `${tool} was already executed ${Math.floor(sinceLast / 1000)}s ago. Not repeating it; wait ${waitS}s before asking again.`,
+                error: 'LIFECYCLE_DEDUPE',
                 status: 'denied',
                 code: 'LIFECYCLE_DEDUPE',
+                reason: 'lifecycle_dedupe',
+                tool,
                 retryable: false,
                 actionId,
                 durationMs: duration(),

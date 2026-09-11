@@ -55,7 +55,7 @@ Verified against panel `v1.1.44` at `$PANEL_BASE_URL`, with `$PZ_SERVER_NAME` as
 - Controlled lifecycle operations: save, restart with warning, start, stop (graceful).
 - Optional server broadcast and mod update checks (enabled in this deployment).
 - Privileged recognition of the owner by Discord user ID, with role-based mutation grants.
-- Pre-action progress updates and sanitized outputs (no mass mentions, no secret leaks).
+- LLM-drafted intent/progress/result wording (runtime sends the model's own intent verbatim, sanitized; no mass mentions, no secret leaks).
 - Persistent conversation memory (SQLite with in-memory fallback, 20 messages, 2h TTL).
 - Unit and adversarial tests, strict lint and typecheck, reproducible builds.
 
@@ -260,7 +260,7 @@ src/
   preflight.ts
   config.ts
   discord/client.ts
-  discord/progressMessages.ts
+  discord/channelQueue.ts
   llm/client.ts
   llm/orchestrator.ts
   llm/systemPrompt.ts
