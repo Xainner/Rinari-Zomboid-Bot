@@ -2,6 +2,7 @@ import type OpenAI from 'openai';
 import { AppConfig } from '../config.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { buildToolDefinitions, ToolDefinition, ALLOWED_TOOL_NAMES } from '../tools/definitions.js';
+import { projectToolResultForLlm, serializeForLlm } from '../tools/projector.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { isLifecycleTool } from '../tools/registry.js';
 import { ConversationStore } from '../state/conversationStore.js';
@@ -177,11 +178,24 @@ export class Orchestrator {
         if (toolCallsMade >= this.config.maxToolCallsPerMessage) break;
         toolCallsMade++;
         const name = (call as { function?: { name?: string } }).function?.name ?? '';
-        let args: Record<string, unknown> = {};
+        const rawArgsText = (call as { function?: { arguments?: string } }).function?.arguments ?? '{}';
+        let args: Record<string, unknown>;
         try {
-          args = JSON.parse((call as { function?: { arguments?: string } }).function?.arguments ?? '{}') as Record<string, unknown>;
+          const parsed: unknown = JSON.parse(rawArgsText);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('not an object');
+          }
+          args = parsed as Record<string, unknown>;
         } catch {
-          args = {};
+          // Harness v2 §2: never silently coerce invalid JSON into {}. The model
+          // gets a structured INVALID_TOOL_ARGUMENTS result it can correct.
+          logger.warn('llm_invalid_tool_json', { tool: sanitizeForLog(name) });
+          messages.push({
+            role: 'tool',
+            content: serializeForLlm({ ok: false, status: 'failed', code: 'INVALID_TOOL_ARGUMENTS', error: 'Tool arguments were not valid JSON. Retry with a JSON object matching the tool schema.' }),
+            tool_call_id: (call as { id?: string }).id ?? '',
+          });
+          continue;
         }
         if (MUTATION_TOOLS.has(name) || isLifecycleTool(name)) {
           try {
@@ -195,9 +209,13 @@ export class Orchestrator {
           memberRoleIds: msg.memberRoleIds,
           channelId: msg.channelId,
         });
+        const execRes = result as { ok?: boolean; data?: unknown; status?: string; code?: string; error?: string };
+        const projected = execRes.ok
+          ? projectToolResultForLlm(name, execRes.data ?? {})
+          : { ok: false, status: execRes.status ?? 'failed', code: execRes.code, error: execRes.error };
         messages.push({
           role: 'tool',
-          content: JSON.stringify(result).slice(0, 3000),
+          content: serializeForLlm(projected),
           tool_call_id: (call as { id?: string }).id ?? '',
         });
       }

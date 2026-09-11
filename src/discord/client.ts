@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits, Message, Partials } from 'discord.js
 import { AppConfig } from '../config.js';
 import { Orchestrator } from '../llm/orchestrator.js';
 import { progressForTool } from './progressMessages.js';
+import { sharedChannelQueue } from './channelQueue.js';
 import { isAdmin } from '../security/policy.js';
 import { checkRateLimit } from '../security/rateLimit.js';
 import { sanitizeDiscord } from '../security/sanitize.js';
@@ -62,22 +63,25 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
       pokeTyping();
       // Discord typing expires after ~10s; refresh while slow LLM legs run.
       typingTimer = setInterval(pokeTyping, 8000);
-      const reply = await orchestrator.handle(
-        {
-          channelId: msg.channelId,
-          authorId: msg.author.id,
-          authorLabel: msg.author.username,
-          memberRoleIds,
-          text: msg.content.slice(0, 2000),
-        },
-        {
-          onToolStart: async (tool: string) => {
-            const progress = progressForTool(tool, adminUser, config.pzServerName);
-            if (progress) {
-              await sendReply(msg, sanitizeDiscord(progress));
-            }
+      // Harness v2 §8: FIFO per channel so histories and tool calls cannot interleave.
+      const reply = await sharedChannelQueue().run(msg.channelId, () =>
+        orchestrator.handle(
+          {
+            channelId: msg.channelId,
+            authorId: msg.author.id,
+            authorLabel: msg.author.username,
+            memberRoleIds,
+            text: msg.content.slice(0, 2000),
           },
-        },
+          {
+            onToolStart: async (tool: string) => {
+              const progress = progressForTool(tool, adminUser, config.pzServerName);
+              if (progress) {
+                await sendReply(msg, sanitizeDiscord(progress));
+              }
+            },
+          },
+        ),
       );
       const chunks = splitDiscord(reply);
       for (const chunk of chunks) {

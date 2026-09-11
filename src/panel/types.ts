@@ -12,6 +12,11 @@ export interface Arkno2Status {
   rcon: string;
   panelBridge: string;
   consoleErrors: number;
+  /** True when the error-count endpoint failed and consoleErrors is a fallback. */
+  consoleErrorsUnavailable?: boolean;
+  /** Harness v2 partial marker (doc 01 section 7). Never silently default. */
+  partial?: boolean;
+  code?: string;
 }
 
 export interface PlayersResult {
@@ -110,6 +115,10 @@ export interface WorldInfoResult {
   ok: boolean;
   server: string;
   available: boolean;
+  /** Which bridge sections failed (partial result, doc 01 section 7). */
+  unavailable?: string[];
+  partial?: boolean;
+  code?: string;
   time?: { year: number; month: number; day: number; hour: number; minute: number; nightsSurvived: number };
   weather?: { temperature: number; raining: boolean; snowing: boolean; storm: boolean; fog: number; clouds: number };
   zombies?: number;
@@ -160,6 +169,10 @@ export interface ModStatusResult {
   tracked: number;
   updatesAvailable: number;
   raw?: unknown;
+  /** Harness v2: true when one or more sub-endpoints failed. */
+  partial?: boolean;
+  code?: string;
+  missing?: string[];
 }
 
 export class PanelError extends Error {
