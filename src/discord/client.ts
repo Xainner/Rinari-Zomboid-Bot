@@ -1,9 +1,7 @@
 import { Client, Events, GatewayIntentBits, Message, Partials } from 'discord.js';
 import { AppConfig } from '../config.js';
 import { Orchestrator } from '../llm/orchestrator.js';
-import { progressForTool } from './progressMessages.js';
 import { sharedChannelQueue } from './channelQueue.js';
-import { isAdmin } from '../security/policy.js';
 import { checkRateLimit } from '../security/rateLimit.js';
 import { sanitizeDiscord } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
@@ -55,7 +53,6 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
       if (!shouldHandleMessage(msg, config)) return;
       if (!checkRateLimit(msg.author.id)) return;
       const memberRoleIds = msg.member?.roles.cache.map((r) => r.id) ?? [];
-      const adminUser = isAdmin(msg.author.id, config.adminUserId);
       const ch = msg.channel as SendableChannel;
       const pokeTyping = (): void => {
         if (typeof ch.sendTyping === 'function') ch.sendTyping().catch(() => undefined);
@@ -74,11 +71,8 @@ export function createDiscordClient(config: AppConfig, orchestrator: Orchestrato
             text: msg.content.slice(0, 2000),
           },
           {
-            onToolStart: async (tool: string) => {
-              const progress = progressForTool(tool, adminUser, config.pzServerName);
-              if (progress) {
-                await sendReply(msg, sanitizeDiscord(progress));
-              }
+            onIntent: async (intent: string) => {
+              await sendReply(msg, sanitizeDiscord(intent));
             },
           },
         ),

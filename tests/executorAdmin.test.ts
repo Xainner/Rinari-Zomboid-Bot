@@ -37,7 +37,12 @@ describe('admin-only tools', () => {
     const ex = executor();
     const r = await ex.execute('get_player_position', {}, CTX('user-2'));
     expect(r.denied).toBe(true);
-    expect(r.error).toMatch(/Xainner/);
+    expect(r.status).toBe('denied');
+    expect(r.code).toBe('ADMIN_ONLY');
+    expect(r.reason).toBe('requester_is_not_admin');
+    // Doc 02 §10: runtime returns structured codes, never dialogue for Discord.
+    expect(r.error).not.toMatch(/Xainner/);
+    expect(r.error).toContain('ADMIN_ONLY');
   });
 
   it('allows admin through', async () => {

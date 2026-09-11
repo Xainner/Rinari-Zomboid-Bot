@@ -198,3 +198,48 @@ export const ADMIN_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'give_item',
   'set_godmode',
 ]);
+
+/**
+ * Semantic metadata for the LLM (doc 02 §13). Operational context only:
+ * effect, risk, access and confirmation. No phrases, no dialogue.
+ * Policy is still enforced in code (executor + policy.ts), never by the model.
+ */
+export type ToolEffect = 'query' | 'mutation' | 'moderation';
+export type ToolRisk = 'low' | 'medium' | 'high';
+export type ToolAccess = 'public' | 'privileged' | 'admin';
+
+export interface ToolMetadata {
+  name: ToolName;
+  effect: ToolEffect;
+  risk: ToolRisk;
+  access: ToolAccess;
+  confirmation: 'none' | 'required';
+}
+
+export const TOOL_METADATA: Record<ToolName, ToolMetadata> = {
+  get_server_status: { name: 'get_server_status', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_players: { name: 'get_players', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_player_hours: { name: 'get_player_hours', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_player_activity: { name: 'get_player_activity', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_death_ranking: { name: 'get_death_ranking', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_mod_updates_detail: { name: 'get_mod_updates_detail', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_next_maintenance: { name: 'get_next_maintenance', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_backups: { name: 'get_backups', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_world_info: { name: 'get_world_info', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_recent_errors: { name: 'get_recent_errors', effect: 'query', risk: 'medium', access: 'admin', confirmation: 'none' },
+  get_player_position: { name: 'get_player_position', effect: 'query', risk: 'medium', access: 'admin', confirmation: 'none' },
+  kick_player: { name: 'kick_player', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },
+  ban_player: { name: 'ban_player', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },
+  unban_player: { name: 'unban_player', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },
+  teleport_player: { name: 'teleport_player', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },
+  give_item: { name: 'give_item', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },
+  set_godmode: { name: 'set_godmode', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },
+  get_mod_status: { name: 'get_mod_status', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  check_mod_updates: { name: 'check_mod_updates', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  save_world: { name: 'save_world', effect: 'mutation', risk: 'low', access: 'privileged', confirmation: 'none' },
+  restart_server: { name: 'restart_server', effect: 'mutation', risk: 'high', access: 'privileged', confirmation: 'none' },
+  start_server: { name: 'start_server', effect: 'mutation', risk: 'high', access: 'privileged', confirmation: 'none' },
+  stop_server: { name: 'stop_server', effect: 'mutation', risk: 'high', access: 'privileged', confirmation: 'none' },
+  broadcast_server_message: { name: 'broadcast_server_message', effect: 'mutation', risk: 'medium', access: 'privileged', confirmation: 'none' },
+  cancel_pending_mod_restart: { name: 'cancel_pending_mod_restart', effect: 'mutation', risk: 'medium', access: 'privileged', confirmation: 'none' },
+};
