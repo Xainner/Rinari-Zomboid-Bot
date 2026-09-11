@@ -41,7 +41,8 @@ export function concurrencyDomainForTool(tool: ToolName): string {
 const LOCKED_DOMAINS: ReadonlySet<string> = new Set([
   'lifecycle',
   'mods',
-  'backups',
+  // 'backups' reserved for Fase 5 (create/restore): get_backups is read-only
+  // and never acquires a lock, so listing it here would be dead config.
   'moderation',
   'world',
 ]);

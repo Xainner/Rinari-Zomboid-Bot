@@ -3,6 +3,10 @@
  *
  * The LLM must never infer operational state from free-text errors.
  * Every tool execution maps to one of these statuses.
+ *
+ * NOTE Fase 1: ExecutionResult in executor.ts carries these fields for
+ * compat (ok/denied + status/code/...). Full migration to ToolResult<T>
+ * happens in Fase 2 with ToolSpecRegistry.
  */
 export type ToolStatus =
   | 'success'
@@ -38,84 +42,4 @@ export function newActionId(): string {
 
 export function resetActionCounterForTests(): void {
   actionCounter = 0;
-}
-
-export function okResult<T>(data: T, opts?: Partial<ToolResult<T>>): ToolResult<T> {
-  return {
-    status: 'success',
-    data,
-    sideEffect: false,
-    verified: false,
-    retryable: false,
-    actionId: newActionId(),
-    durationMs: 0,
-    ...opts,
-  };
-}
-
-export function partialResult<T>(data: T, code: string, summary?: string, opts?: Partial<ToolResult<T>>): ToolResult<T> {
-  return {
-    status: 'partial',
-    code,
-    summary,
-    data,
-    sideEffect: false,
-    verified: false,
-    retryable: false,
-    actionId: newActionId(),
-    durationMs: 0,
-    ...opts,
-  };
-}
-
-export function deniedResult(code: string, summary?: string): ToolResult<never> {
-  return {
-    status: 'denied',
-    code,
-    summary,
-    sideEffect: false,
-    verified: false,
-    retryable: false,
-    actionId: newActionId(),
-    durationMs: 0,
-  };
-}
-
-export function failedResult(code: string, summary?: string, retryable = false): ToolResult<never> {
-  return {
-    status: 'failed',
-    code,
-    summary,
-    retryable,
-    sideEffect: false,
-    verified: false,
-    actionId: newActionId(),
-    durationMs: 0,
-  };
-}
-
-export function unknownOutcomeResult(code: string, summary?: string): ToolResult<never> {
-  return {
-    status: 'unknown_outcome',
-    code,
-    summary,
-    retryable: false,
-    sideEffect: true,
-    verified: false,
-    actionId: newActionId(),
-    durationMs: 0,
-  };
-}
-
-export function retryableResult(code: string, summary?: string): ToolResult<never> {
-  return {
-    status: 'retryable_error',
-    code,
-    summary,
-    retryable: true,
-    sideEffect: false,
-    verified: false,
-    actionId: newActionId(),
-    durationMs: 0,
-  };
 }

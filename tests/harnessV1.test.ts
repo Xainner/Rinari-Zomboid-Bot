@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ToolExecutor } from '../src/tools/executor.js';
 import { resetDomainLocksForTests, tryAcquireDomainLock, releaseDomainLock } from '../src/tools/concurrency.js';
+import { resetLifecycleLockForTests } from '../src/tools/registry.js';
 import { projectToolResultForLlm, serializeForLlm } from '../src/tools/projector.js';
 import { ChannelQueue } from '../src/discord/channelQueue.js';
 import { PanelClient } from '../src/panel/client.js';
@@ -55,6 +56,7 @@ function panelMock(over: Record<string, unknown> = {}): PanelClientType {
 beforeEach(() => {
   vi.restoreAllMocks();
   resetDomainLocksForTests();
+  resetLifecycleLockForTests();
 });
 
 describe('harness v2 fase 1', () => {
@@ -146,6 +148,84 @@ describe('harness v2 fase 1', () => {
     const s = serializeForLlm(projectToolResultForLlm('get_players', big));
     expect(s.length).toBeLessThanOrEqual(3000);
     expect(() => JSON.parse(s)).not.toThrow();
+  });
+
+  it('projector never emits half-cut JSON for giant strings without arrays', () => {
+    const giant = { ok: true, server: 'ARKNO2', count: 1, lines: 'x'.repeat(9000) };
+    const s = serializeForLlm(projectToolResultForLlm('get_recent_errors', giant), 1000);
+    expect(s.length).toBeLessThanOrEqual(1000);
+    expect(() => JSON.parse(s)).not.toThrow();
+    const parsed = JSON.parse(s) as Record<string, unknown>;
+    // Either top-level truncated envelope or in-field truncation marker is fine;
+    // what matters is valid JSON within the cap.
+    const hasMarker = 'truncated' in parsed || JSON.stringify(parsed).includes('[truncated]');
+    expect(hasMarker).toBe(true);
+  });
+
+  it('mutation POST with transient 503 surfaces as unknown_outcome, not retryable', async () => {
+    const panel = panelMock({
+      saveWorld: async () => {
+        throw new PanelError('Panel request failed: POST /api/server/save', 503);
+      },
+    });
+    const ex = new ToolExecutor(panel, baseConfig());
+    const r = await ex.execute('save_world', {}, CTX('admin-1'));
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe('unknown_outcome');
+    expect(r.code).toBe('PANEL_503_AFTER_SEND');
+    expect(r.retryable).toBe(false);
+    expect(r.sideEffect).toBe(true);
+  });
+
+  it('read GET with transient 503 stays retryable_error', async () => {
+    const panel = panelMock({
+      getPlayers: async () => {
+        throw new PanelError('Panel request failed: GET /api/players', 503);
+      },
+    });
+    const ex = new ToolExecutor(panel, baseConfig());
+    const r = await ex.execute('get_players', {}, CTX());
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe('retryable_error');
+    expect(r.retryable).toBe(true);
+  });
+
+  it('server mismatch blocks mutation with SERVER_MISMATCH', async () => {
+    const { PolicyError } = await import('../src/panel/types.js');
+    const panel = panelMock({
+      restartServer: async () => {
+        throw new PolicyError('Active server mismatch: expected ARKNO2');
+      },
+    });
+    const ex = new ToolExecutor(panel, baseConfig());
+    const r = await ex.execute('restart_server', { warning_minutes: 5 }, { authorId: 'admin-1', memberRoleIds: [], channelId: 'c' });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe('failed');
+    expect(r.code).toBe('SERVER_MISMATCH');
+  });
+
+  it('concurrent lifecycle mutations deny the second caller', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    const panel = panelMock({
+      restartServer: async () => {
+        await gate;
+        return { ok: true, server: 'ARKNO2', warningMinutes: 5 };
+      },
+    });
+    const ex = new ToolExecutor(panel, baseConfig());
+    const admin = { authorId: 'admin-1', memberRoleIds: [] as string[], channelId: 'c' };
+    const first = ex.execute('restart_server', { warning_minutes: 5 }, admin);
+    // Give the first call a tick to acquire both locks.
+    await new Promise((r) => setTimeout(r, 10));
+    const second = await ex.execute('restart_server', { warning_minutes: 5 }, admin);
+    expect(second.ok).toBe(false);
+    expect(second.denied).toBe(true);
+    expect(['DOMAIN_BUSY', 'LIFECYCLE_BUSY']).toContain(second.code);
+    release();
+    const r1 = await first;
+    expect(r1.ok).toBe(true);
+    ToolExecutor.resetLifecycleDedupeForTests(ex);
   });
 
   it('orchestrator never coerces invalid tool JSON into executor call', async () => {

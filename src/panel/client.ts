@@ -38,6 +38,15 @@ export class PanelClient {
     return name === 'AbortError' || name === 'TimeoutError' || /aborted|timeout|timed out|ETIMEDOUT/i.test(msg);
   }
 
+  private static isNetworkFailure(err: unknown): boolean {
+    const name = (err as { name?: string })?.name ?? '';
+    const msg = err instanceof Error ? err.message : String(err);
+    return (
+      name === 'TypeError' ||
+      /fetch failed|network|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up/i.test(msg)
+    );
+  }
+
   private async call<T>(method: string, path: string, body?: unknown, opts?: { retryGet?: boolean }): Promise<T> {
     const attempt = async (token: string): Promise<T> => {
       const ctrl = new AbortController();
@@ -59,10 +68,13 @@ export class PanelClient {
         if (res.status === 204) return undefined as T;
         return (await res.json().catch(() => undefined)) as T;
       } catch (err) {
-        // POST timeout is ambiguous: the panel may have received the action.
+        // POST ambiguity: timeout OR network drop after send may still have executed.
         // Never auto-retry; surface unknown_outcome so the caller verifies via GET.
         if (method !== 'GET' && PanelClient.isTimeout(err)) {
           throw new PanelError(`Panel ${method} ${path} timed out after send (outcome unknown)`, 0, 'REQUEST_TIMEOUT_AFTER_SEND');
+        }
+        if (method !== 'GET' && PanelClient.isNetworkFailure(err)) {
+          throw new PanelError(`Panel ${method} ${path} failed after send (outcome unknown)`, 0, 'REQUEST_SEND_AMBIGUOUS');
         }
         throw err;
       } finally {

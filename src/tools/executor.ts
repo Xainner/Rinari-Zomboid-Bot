@@ -43,7 +43,7 @@ export class ToolExecutor {
     executor.lastLifecycleAt.clear();
   }
 
-  private mapErrorToResult(tool: string, err: unknown, started: number, actionId: string): ExecutionResult {
+  private mapErrorToResult(tool: string, err: unknown, started: number, actionId: string, isMutation = false): ExecutionResult {
     const durationMs = Date.now() - started;
     const rawMsg = err instanceof Error ? err.message : String(err);
     // Unknown tool: fail-closed, never retryable.
@@ -51,16 +51,16 @@ export class ToolExecutor {
       return { ok: false, error: rawMsg, status: 'failed', code: 'UNKNOWN_TOOL', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
     }
     // Schema/validation failures are explicit, never silent {}.
-    if (/Invalid argument|must be|is required|out of range|invalid format/i.test(rawMsg)) {
+    if (/Invalid argument|must be|is required|in range|range|invalid format/i.test(rawMsg)) {
       return { ok: false, error: rawMsg, status: 'failed', code: 'INVALID_TOOL_ARGUMENTS', retryable: false, actionId, durationMs, sideEffect: false, verified: false };
     }
     if (err instanceof PanelError) {
-      if (err.code === 'REQUEST_TIMEOUT_AFTER_SEND') {
+      if (err.code === 'REQUEST_TIMEOUT_AFTER_SEND' || err.code === 'REQUEST_SEND_AMBIGUOUS') {
         return {
           ok: false,
           error: 'La orden se envió pero el panel no respondió a tiempo; resultado desconocido. Verifica el estado antes de repetir.',
           status: 'unknown_outcome',
-          code: 'REQUEST_TIMEOUT_AFTER_SEND',
+          code: err.code,
           retryable: false,
           actionId,
           durationMs,
@@ -69,6 +69,21 @@ export class ToolExecutor {
         };
       }
       if (err.status === 408 || err.status === 429 || err.status === 502 || err.status === 503 || err.status === 504) {
+        // Reads may retry; mutations must never auto-retry a POST that could
+        // have executed. Surface unknown_outcome so the caller verifies via GET.
+        if (isMutation) {
+          return {
+            ok: false,
+            error: `El panel devolvió ${err.status} tras una mutación; resultado desconocido. Verifica el estado antes de repetir.`,
+            status: 'unknown_outcome',
+            code: `PANEL_${err.status}_AFTER_SEND`,
+            retryable: false,
+            actionId,
+            durationMs,
+            sideEffect: true,
+            verified: false,
+          };
+        }
         return { ok: false, error: rawMsg, status: 'retryable_error', code: `PANEL_${err.status}`, retryable: true, actionId, durationMs, sideEffect: false, verified: false };
       }
       if (err.status === 403 || err.code === 'FORBIDDEN') {
@@ -271,7 +286,17 @@ export class ToolExecutor {
         releaseDomainLock(this.config.pzServerName, domain);
       }
     } catch (err) {
-      const mapped = this.mapErrorToResult(tool, err, started, actionId);
+      // Mutations that fail ambiguously must surface unknown_outcome, never retryable.
+      let isMutation = false;
+      try {
+        const known = tool as ToolName;
+        isMutation = !this.isReadOnly(known) || isLifecycleTool(tool) || ADMIN_ONLY_TOOLS.has(tool);
+        // check_mod_updates is dual: read path but POSTs; treat as mutation for safety.
+        if (tool === 'check_mod_updates') isMutation = true;
+      } catch {
+        isMutation = false;
+      }
+      const mapped = this.mapErrorToResult(tool, err, started, actionId, isMutation);
       logger.warn('tool_execution', {
         tool,
         requesterId: ctx.authorId,

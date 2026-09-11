@@ -111,6 +111,17 @@ export function serializeForLlm(projected: unknown, hardCap = 3000): string {
   if (largest) {
     (shrunk as Record<string, unknown>)[largest] = `[truncated ${largestLen} items]`;
     out = JSON.stringify(shrunk) ?? '{}';
+    if (out.length <= hardCap) return out;
   }
-  return out.length <= hardCap ? out : `${out.slice(0, hardCap - 20)}..."truncated":true}`;
+  // Truncate long string fields before giving up (e.g. console lines).
+  for (const k of Object.keys(shrunk)) {
+    const v = shrunk[k];
+    if (typeof v === 'string' && v.length > 500) shrunk[k] = `${v.slice(0, 500)}...[truncated]`;
+    if (Array.isArray(v)) shrunk[k] = `[truncated ${v.length} items]`;
+  }
+  out = JSON.stringify(shrunk) ?? '{}';
+  if (out.length <= hardCap) return out;
+  // Absolute fallback: always valid JSON, never a sliced object.
+  const preview = JSON.stringify(shrunk).slice(0, Math.max(0, hardCap - 60));
+  return JSON.stringify({ truncated: true, preview });
 }
