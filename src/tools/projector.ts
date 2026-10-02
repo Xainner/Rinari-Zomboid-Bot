@@ -41,6 +41,10 @@ export function projectToolResultForLlm(toolName: string, result: unknown): unkn
     case 'get_next_maintenance':
     case 'get_backups':
     case 'get_world_info':
+    case 'get_installed_mods':
+    case 'get_workshop_health':
+    case 'get_server_health':
+    case 'get_community_digest':
     case 'get_recent_errors':
     case 'get_player_position':
     case 'get_mod_status':

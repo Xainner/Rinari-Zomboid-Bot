@@ -175,6 +175,51 @@ export interface ModStatusResult {
   missing?: string[];
 }
 
+export type InstalledModEntry = ModUpdateEntry;
+
+export interface InstalledModsResult {
+  ok: boolean;
+  server: string;
+  total: number;
+  count: number;
+  mods: InstalledModEntry[];
+  partial?: boolean;
+  code?: string;
+}
+
+export interface WorkshopHealthResult {
+  ok: boolean;
+  server: string;
+  reachable: boolean;
+  lastChecked: string | null;
+  pendingUpdates?: number;
+  partial?: boolean;
+  code?: string;
+  missing?: string[];
+}
+
+export interface ServerHealthResult {
+  ok: boolean;
+  server: string;
+  online: boolean;
+  status: string;
+  uptimeSeconds: number | null;
+  partial?: boolean;
+  code?: string;
+}
+
+export interface CommunityDigestResult {
+  ok: boolean;
+  server: string;
+  onlineCount: number;
+  onlineSample: string[];
+  last24h: { connects: number; deaths: number };
+  nextMaintenance: { label: string; at: string } | null;
+  unavailable?: string[];
+  partial?: boolean;
+  code?: string;
+}
+
 export class PanelError extends Error {
   status: number;
   code?: string;

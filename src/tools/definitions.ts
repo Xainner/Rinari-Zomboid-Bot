@@ -312,6 +312,46 @@ export function buildToolDefinitions(opts: ToolBuildOptions): ToolDefinition[] {
         parameters: { type: 'object', properties: {}, additionalProperties: false },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'get_installed_mods',
+        description: `Lista mods instalados en ${serverName} (nombre + workshop_id, sin rutas ni configs).`,
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Mods a devolver (default 10).' },
+            search: { type: 'string', minLength: 1, maxLength: 64, description: 'Filtra por nombre o workshop_id.' },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_workshop_health',
+        description: `Salud de Steam Workshop para ${serverName}: alcanzable o no y ultimo chequeo.`,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_server_health',
+        description: `Liveness ligera de ${serverName}: online/offline y uptime si el panel lo reporta.`,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_community_digest',
+        description: `Resumen de comunidad de ${serverName}: online, actividad reciente y proximo mantenimiento.`,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
   ];
   if (opts.enableModTools) {
     tools.push(
@@ -371,6 +411,10 @@ export const ALLOWED_TOOL_NAMES = new Set([
   'get_next_maintenance',
   'get_backups',
   'get_world_info',
+  'get_installed_mods',
+  'get_workshop_health',
+  'get_server_health',
+  'get_community_digest',
   'get_recent_errors',
   'get_player_position',
   'kick_player',

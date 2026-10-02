@@ -345,6 +345,10 @@ export class ToolExecutor {
       tool === 'get_next_maintenance' ||
       tool === 'get_backups' ||
       tool === 'get_world_info' ||
+      tool === 'get_installed_mods' ||
+      tool === 'get_workshop_health' ||
+      tool === 'get_server_health' ||
+      tool === 'get_community_digest' ||
       tool === 'get_recent_errors' ||
       tool === 'get_player_position' ||
       tool === 'get_mod_status' ||
@@ -380,6 +384,17 @@ export class ToolExecutor {
         );
       case 'get_world_info':
         return this.panel.getWorldInfo();
+      case 'get_installed_mods':
+        return this.panel.getInstalledMods(
+          typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,
+          args['search'] as string | undefined,
+        );
+      case 'get_workshop_health':
+        return this.panel.getWorkshopHealth();
+      case 'get_server_health':
+        return this.panel.getServerHealth();
+      case 'get_community_digest':
+        return this.panel.getCommunityDigest();
       case 'get_recent_errors':
         return this.panel.getRecentErrors(
           typeof args['limit'] === 'number' ? (args['limit'] as number) : undefined,

@@ -10,6 +10,10 @@ export type ToolName =
   | 'get_next_maintenance'
   | 'get_backups'
   | 'get_world_info'
+  | 'get_installed_mods'
+  | 'get_workshop_health'
+  | 'get_server_health'
+  | 'get_community_digest'
   | 'get_recent_errors'
   | 'get_player_position'
   | 'kick_player'
@@ -55,6 +59,20 @@ export function assertKnownTool(name: string): asserts name is ToolName {
   }
 }
 
+function assertLimit(args: Record<string, unknown>, min: number, max: number): void {
+  const l = args['limit'];
+  if (l !== undefined && (!Number.isInteger(l) || (l as number) < min || (l as number) > max)) {
+    throw new Error(`limit must be an integer in range ${min}..${max}`);
+  }
+}
+
+function assertNameLike(args: Record<string, unknown>, key: string): void {
+  const v = args[key];
+  if (v !== undefined && (typeof v !== 'string' || (v as string).trim().length < 1 || (v as string).length > 64)) {
+    throw new Error(`${key} must be a string of length 1..64`);
+  }
+}
+
 export function validateToolArgs(name: ToolName, args: Record<string, unknown>): void {
   const allowedByTool: Record<ToolName, string[]> = {
     get_server_status: [],
@@ -66,6 +84,10 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
     get_next_maintenance: [],
     get_backups: ['limit'],
     get_world_info: [],
+    get_installed_mods: ['limit', 'search'],
+    get_workshop_health: [],
+    get_server_health: [],
+    get_community_digest: [],
     get_recent_errors: ['limit'],
     get_player_position: ['player_name'],
     kick_player: ['player_name', 'reason'],
@@ -107,39 +129,25 @@ export function validateToolArgs(name: ToolName, args: Record<string, unknown>):
       throw new Error('message must be a string of length 1..300');
     }
   }
-  if (name === 'get_player_hours' || name === 'get_player_activity') {
-    const p = args['player_name'];
-    if (p !== undefined && (typeof p !== 'string' || p.trim().length < 1 || p.length > 64)) {
-      throw new Error('player_name must be a string of length 1..64');
-    }
+  if (name === 'get_player_hours' || name === 'get_player_activity' || name === 'get_player_position') {
+    assertNameLike(args, 'player_name');
   }
   if (name === 'get_player_activity') {
     const a = args['action'];
     if (a !== undefined && (typeof a !== 'string' || !['connect', 'disconnect', 'death'].includes(a))) {
       throw new Error('action must be one of: connect, disconnect, death');
     }
-    const l = args['limit'];
-    if (l !== undefined && (!Number.isInteger(l) || (l as number) < 1 || (l as number) > 20)) {
-      throw new Error('limit must be an integer in range 1..20');
-    }
+    assertLimit(args, 1, 20);
   }
   if (name === 'get_death_ranking' || name === 'get_backups') {
-    const l = args['limit'];
-    if (l !== undefined && (!Number.isInteger(l) || (l as number) < 1 || (l as number) > 10)) {
-      throw new Error('limit must be an integer in range 1..10');
-    }
+    assertLimit(args, 1, 10);
+  }
+  if (name === 'get_installed_mods') {
+    assertLimit(args, 1, 20);
+    assertNameLike(args, 'search');
   }
   if (name === 'get_recent_errors') {
-    const l = args['limit'];
-    if (l !== undefined && (!Number.isInteger(l) || (l as number) < 1 || (l as number) > 20)) {
-      throw new Error('limit must be an integer in range 1..20');
-    }
-  }
-  if (name === 'get_player_position') {
-    const p = args['player_name'];
-    if (p !== undefined && (typeof p !== 'string' || p.trim().length < 1 || p.length > 64)) {
-      throw new Error('player_name must be a string of length 1..64');
-    }
+    assertLimit(args, 1, 20);
   }
   if (name === 'kick_player' || name === 'ban_player' || name === 'unban_player' || name === 'set_godmode') {
     const p = args['player_name'];
@@ -226,6 +234,10 @@ export const TOOL_METADATA: Record<ToolName, ToolMetadata> = {
   get_next_maintenance: { name: 'get_next_maintenance', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
   get_backups: { name: 'get_backups', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
   get_world_info: { name: 'get_world_info', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_installed_mods: { name: 'get_installed_mods', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_workshop_health: { name: 'get_workshop_health', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_server_health: { name: 'get_server_health', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
+  get_community_digest: { name: 'get_community_digest', effect: 'query', risk: 'low', access: 'public', confirmation: 'none' },
   get_recent_errors: { name: 'get_recent_errors', effect: 'query', risk: 'medium', access: 'admin', confirmation: 'none' },
   get_player_position: { name: 'get_player_position', effect: 'query', risk: 'medium', access: 'admin', confirmation: 'none' },
   kick_player: { name: 'kick_player', effect: 'moderation', risk: 'high', access: 'admin', confirmation: 'required' },

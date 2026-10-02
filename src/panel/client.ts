@@ -1,5 +1,5 @@
 import { PanelAuth } from './auth.js';
-import { ActiveServer, Arkno2Status, BackupsResult, BackupSummary, DeathRankingResult, ModStatusResult, ModUpdatesDetailResult, NextMaintenanceResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayerModerationResult, PlayerPosition, PlayerPositionResult, PlayersResult, PolicyError, RecentErrorsResult, WorldInfoResult } from './types.js';
+import { ActiveServer, Arkno2Status, BackupsResult, BackupSummary, CommunityDigestResult, DeathRankingResult, InstalledModsResult, ModStatusResult, ModUpdatesDetailResult, NextMaintenanceResult, PanelError, PlayerActivityEvent, PlayerActivityResult, PlayerHoursEntry, PlayerHoursResult, PlayerModerationResult, PlayerPosition, PlayerPositionResult, PlayersResult, PolicyError, RecentErrorsResult, ServerHealthResult, WorkshopHealthResult, WorldInfoResult } from './types.js';
 import { sanitizeConsoleLine, sanitizeServerMessage } from '../security/sanitize.js';
 import { logger } from '../util/logger.js';
 
@@ -152,11 +152,7 @@ export class PanelClient {
 
   async getPlayers(): Promise<PlayersResult> {
     const data = await this.call<unknown>('GET', '/api/players');
-    const arr = Array.isArray(data) ? data : (data as Record<string, unknown>)?.['players'];
-    const list = Array.isArray(arr) ? arr : [];
-    const names = list
-      .map((p) => (typeof p === 'string' ? p : (p as Record<string, unknown>)?.['name']))
-      .filter((n): n is string => typeof n === 'string');
+    const names = PanelClient.extractPlayerNames(data, 500) ?? [];
     return { ok: true, server: this.opts.serverName, count: names.length, players: names };
   }
 
@@ -200,6 +196,61 @@ export class PanelClient {
       throw new PolicyError('player_name has an invalid format');
     }
     return name.trim();
+  }
+
+  private static assertSearch(search: unknown): string {
+    if (typeof search !== 'string' || search.trim().length < 1 || search.length > 64) {
+      throw new PolicyError('search must be a string of length 1..64');
+    }
+    // Same guard family as player names: literal filter text, never a path.
+    // eslint-disable-next-line no-control-regex
+    if (!/^[^\x00-\x1F\x7F"\\]{1,64}$/.test(search.trim())) {
+      throw new PolicyError('search has an invalid format');
+    }
+    return search.trim().toLowerCase();
+  }
+
+  private static toModEntry(raw: Record<string, unknown>, nameCap = 100): { workshop_id: string; name: string } | null {
+    const workshop_id = String(raw['workshop_id'] ?? '');
+    if (workshop_id.length === 0) return null;
+    const name = typeof raw['name'] === 'string' && raw['name'].length > 0 ? (raw['name'] as string).slice(0, nameCap) : workshop_id.slice(0, nameCap);
+    return { workshop_id, name };
+  }
+
+  private static asModList(data: unknown): Record<string, unknown>[] | null {
+    const rawList = Array.isArray(data) ? data : (data as Record<string, unknown> | null)?.['mods'];
+    return Array.isArray(rawList) ? (rawList as Record<string, unknown>[]) : null;
+  }
+
+  private static extractPlayerNames(raw: unknown, cap = 50): string[] | null {
+    const arr = Array.isArray(raw) ? raw : (raw as Record<string, unknown> | null)?.['players'];
+    if (!Array.isArray(arr)) return null;
+    return arr
+      .map((p) => (typeof p === 'string' ? p : (p as Record<string, unknown>)?.['name']))
+      .filter((n): n is string => typeof n === 'string')
+      .slice(0, cap);
+  }
+
+  private static toNextMaintenance(raw: Record<string, unknown> | null | undefined): { label: string; at: string } | null {
+    if (raw && typeof raw['label'] === 'string' && typeof raw['at'] === 'string') {
+      return { label: raw['label'] as string, at: raw['at'] as string };
+    }
+    return null;
+  }
+
+  private static pickString(data: Record<string, unknown>, keys: string[]): string | null {
+    for (const k of keys) {
+      if (typeof data[k] === 'string') return data[k] as string;
+    }
+    return null;
+  }
+
+  private static pickNonNegativeInt(data: Record<string, unknown>, keys: string[]): number | null {
+    for (const k of keys) {
+      const v = data[k];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return Math.floor(v);
+    }
+    return null;
   }
 
   async getPlayerHours(playerName?: string): Promise<PlayerHoursResult> {
@@ -282,26 +333,123 @@ export class PanelClient {
 
   async getModUpdatesDetail(): Promise<ModUpdatesDetailResult> {
     const data = await this.call<Record<string, unknown>>('GET', '/api/mods/tracked');
-    const raw = data?.['mods'];
-    const list = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
+    const list = PanelClient.asModList(data) ?? [];
     const updates = list
       .filter((m) => m['update_available'] === 1 || m['update_available'] === true)
-      .map((m) => ({
-        workshop_id: String(m['workshop_id'] ?? ''),
-        name: typeof m['name'] === 'string' && m['name'].length > 0 ? (m['name'] as string) : String(m['workshop_id'] ?? ''),
-      }))
-      .filter((m) => m.workshop_id.length > 0)
+      .map((m) => PanelClient.toModEntry(m))
+      .filter((m): m is { workshop_id: string; name: string } => m !== null)
       .slice(0, 50);
     return { ok: true, server: this.opts.serverName, count: updates.length, updates };
   }
 
+  async getInstalledMods(limit = 10, search?: string): Promise<InstalledModsResult> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
+      throw new PolicyError('limit must be an integer in range 1..20');
+    }
+    const cleanSearch = search === undefined ? undefined : PanelClient.assertSearch(search);
+    const data = await this.call<unknown>('GET', '/api/mods/server-mods').catch(() => null);
+    if (!data) {
+      return { ok: true, server: this.opts.serverName, total: 0, count: 0, mods: [], partial: true, code: 'MOD_LIST_UNAVAILABLE' };
+    }
+    const list = PanelClient.asModList(data);
+    if (!list) {
+      return { ok: true, server: this.opts.serverName, total: 0, count: 0, mods: [], partial: true, code: 'MOD_LIST_SHAPE_UNKNOWN' };
+    }
+    let mods = list
+      .map((m) => PanelClient.toModEntry(m))
+      .filter((m): m is { workshop_id: string; name: string } => m !== null);
+    if (cleanSearch) {
+      mods = mods.filter((m) => m.name.toLowerCase().includes(cleanSearch) || m.workshop_id.includes(cleanSearch));
+    }
+    const total = PanelClient.pickNonNegativeInt(data as Record<string, unknown>, ['total', 'totalMods']) ?? mods.length;
+    const sliced = mods.slice(0, limit);
+    return { ok: true, server: this.opts.serverName, total, count: sliced.length, mods: sliced };
+  }
+
+  async getWorkshopHealth(): Promise<WorkshopHealthResult> {
+    const data = await this.call<Record<string, unknown>>('GET', '/api/mods/workshop-status').catch(() => null);
+    if (!data) {
+      return { ok: true, server: this.opts.serverName, reachable: false, lastChecked: null, partial: true, code: 'WORKSHOP_STATUS_UNAVAILABLE' };
+    }
+    const hasKnownKey = 'reachable' in data || 'status' in data || 'online' in data;
+    if (!hasKnownKey) {
+      return { ok: true, server: this.opts.serverName, reachable: false, lastChecked: null, partial: true, code: 'WORKSHOP_SHAPE_UNKNOWN', missing: ['reachable'] };
+    }
+    const reachable = data['reachable'] === true || data['status'] === 'ok' || data['online'] === true;
+    const lastChecked = PanelClient.pickString(data, ['lastChecked', 'checkedAt']);
+    const pending = PanelClient.pickNonNegativeInt(data, ['pendingUpdates', 'updatesAvailable']);
+    return { ok: true, server: this.opts.serverName, reachable, lastChecked, ...(pending !== null ? { pendingUpdates: pending } : {}) };
+  }
+
+  async getServerHealth(): Promise<ServerHealthResult> {
+    const data = await this.call<Record<string, unknown>>('GET', '/api/server/status').catch(() => null);
+    if (!data) {
+      return { ok: true, server: this.opts.serverName, online: false, status: 'unknown', uptimeSeconds: null, partial: true, code: 'SERVER_STATUS_UNAVAILABLE' };
+    }
+    const hasKnownKey = 'status' in data || 'state' in data || 'online' in data || 'uptimeSeconds' in data || 'uptime' in data;
+    const rawStatus = PanelClient.pickString(data, ['status', 'state']) ?? 'unknown';
+    const lowered = rawStatus.toLowerCase();
+    const online = ['online', 'running', 'up', 'started', 'active', 'healthy', 'on'].includes(lowered) || data['online'] === true;
+    const up = PanelClient.pickNonNegativeInt(data, ['uptimeSeconds', 'uptime']);
+    if (!hasKnownKey) {
+      return { ok: true, server: this.opts.serverName, online, status: rawStatus.slice(0, 32), uptimeSeconds: up, partial: true, code: 'SERVER_STATUS_SHAPE_UNKNOWN' };
+    }
+    return { ok: true, server: this.opts.serverName, online, status: rawStatus.slice(0, 32), uptimeSeconds: up };
+  }
+
+  async getCommunityDigest(): Promise<CommunityDigestResult> {
+    const unavailable: string[] = [];
+    const playersP = this.call<unknown>('GET', '/api/players').catch(() => {
+      unavailable.push('players');
+      return null;
+    });
+    const activityP = this.call<Record<string, unknown>>('GET', '/api/players/activity?limit=50').catch(() => {
+      unavailable.push('activity');
+      return null;
+    });
+    const schedP = this.call<Record<string, unknown>>('GET', '/api/scheduler/status').catch(() => {
+      unavailable.push('scheduler');
+      return null;
+    });
+    const [playersRaw, activityRaw, schedRaw] = await Promise.all([playersP, activityP, schedP]);
+    if (!playersRaw && !activityRaw && !schedRaw) {
+      return { ok: true, server: this.opts.serverName, onlineCount: 0, onlineSample: [], last24h: { connects: 0, deaths: 0 }, nextMaintenance: null, unavailable, partial: true, code: 'DIGEST_UNAVAILABLE' };
+    }
+    const names = playersRaw ? PanelClient.extractPlayerNames(playersRaw, 500) : null;
+    if (playersRaw && !names) unavailable.push('players-shape');
+    const fullNames = names ?? [];
+    let connects = 0;
+    let deaths = 0;
+    if (activityRaw) {
+      const logs = Array.isArray(activityRaw['logs']) ? (activityRaw['logs'] as Record<string, unknown>[]) : null;
+      if (!logs) {
+        unavailable.push('activity-shape');
+      } else {
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        for (const log of logs) {
+          const at = typeof log['logged_at'] === 'string' ? Date.parse(log['logged_at'] as string) : NaN;
+          if (Number.isNaN(at) || at < cutoff) continue;
+          if (log['action'] === 'connect') connects++;
+          else if (log['action'] === 'death') deaths++;
+        }
+      }
+    }
+    const next = schedRaw ? PanelClient.toNextMaintenance(schedRaw['nextRun'] as Record<string, unknown> | null | undefined) : null;
+    return {
+      ok: true,
+      server: this.opts.serverName,
+      onlineCount: fullNames.length,
+      onlineSample: fullNames.slice(0, 5),
+      last24h: { connects, deaths },
+      nextMaintenance: next,
+      ...(unavailable.length > 0 ? { unavailable, partial: true, code: 'DIGEST_PARTIAL' } : {}),
+    };
+  }
+
+
   async getNextMaintenance(): Promise<NextMaintenanceResult> {
     const s = await this.call<Record<string, unknown>>('GET', '/api/scheduler/status');
-    const rawNext = s?.['nextRun'] as Record<string, unknown> | null | undefined;
-    const next =
-      rawNext && typeof rawNext['label'] === 'string' && typeof rawNext['at'] === 'string'
-        ? { label: rawNext['label'] as string, at: rawNext['at'] as string }
-        : null;
+    const next = PanelClient.toNextMaintenance(s?.['nextRun'] as Record<string, unknown> | null | undefined);
     return {
       ok: true,
       server: this.opts.serverName,

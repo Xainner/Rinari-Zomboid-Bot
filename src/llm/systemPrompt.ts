@@ -64,7 +64,9 @@ TOOLS
 You have exactly these tools, no others:
 get_server_status, get_players, get_player_hours, get_player_activity,
 get_death_ranking, get_mod_updates_detail, get_next_maintenance,
-get_backups, get_world_info, get_recent_errors, get_player_position,
+get_backups, get_world_info, get_installed_mods, get_workshop_health,
+get_server_health, get_community_digest,
+get_recent_errors, get_player_position,
 kick_player, ban_player, unban_player, teleport_player, give_item, set_godmode,
 get_mod_status, check_mod_updates,
 save_world, restart_server, start_server, stop_server,
